@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="200dp"
+    android:height="200dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <!-- Base Squircle -->
+    <path
+        android:pathData="M 128,20 L 384,20 C 444,20 492,68 492,128 L 492,384 C 492,444 444,492 384,492 L 128,492 C 68,492 20,444 20,384 L 20,128 C 20,68 68,20 128,20 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="0"
+                android:startY="0"
+                android:endX="512"
+                android:endY="512"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF080E1E" />
+                <item android:offset="0.5" android:color="#FF111B38" />
+                <item android:offset="1.0" android:color="#FF050A15" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Speed Streaks -->
+    <path
+        android:pathData="M 330,140 L 430,140 L 400,160 L 330,160 Z"
+        android:fillColor="#CC00E5FF" />
+    <path
+        android:pathData="M 340,170 L 410,170 L 390,186 L 340,186 Z"
+        android:fillColor="#9900E5FF" />
+    <path
+        android:pathData="M 350,196 L 390,196 L 375,208 L 350,208 Z"
+        android:fillColor="#6600E5FF" />
+
+    <!-- Cyber T Core Shape -->
+    <path
+        android:pathData="M 136,130 L 360,130 L 332,186 L 268,186 L 208,386 L 170,348 L 220,186 L 136,186 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="136"
+                android:startY="130"
+                android:endX="360"
+                android:endY="386"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF38BDF8" />
+                <item android:offset="0.5" android:color="#FF00E5FF" />
+                <item android:offset="1.0" android:color="#FF0284C7" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Inset Lightning Energy Split -->
+    <path
+        android:pathData="M 276,130 L 226,230 L 262,230 L 210,386 L 246,250 L 210,250 L 254,130 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="210"
+                android:startY="130"
+                android:endX="276"
+                android:endY="386"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFDE047" />
+                <item android:offset="0.5" android:color="#FFF97316" />
+                <item android:offset="1.0" android:color="#FFEA580C" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

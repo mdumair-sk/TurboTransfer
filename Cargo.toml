@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = [
+    "core",
+    "transport/usb",
+    "transport/wifi_direct",
+    "tui",
+    "cli",
+    "windows",
+]

@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="200dp"
+    android:height="200dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <!-- Squircle Base -->
+    <path
+        android:pathData="M 128,20 L 384,20 C 444,20 492,68 492,128 L 492,384 C 492,444 444,492 384,492 L 128,492 C 68,492 20,444 20,384 L 20,128 C 20,68 68,20 128,20 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="0"
+                android:startY="0"
+                android:endX="512"
+                android:endY="512"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF0D1527" />
+                <item android:offset="0.5" android:color="#FF152238" />
+                <item android:offset="1.0" android:color="#FF080D1A" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Border Stroke -->
+    <path
+        android:pathData="M 128,20 L 384,20 C 444,20 492,68 492,128 L 492,384 C 492,444 444,492 384,492 L 128,492 C 68,492 20,444 20,384 L 20,128 C 20,68 68,20 128,20 Z"
+        android:strokeWidth="4"
+        android:strokeColor="#334155" />
+
+    <!-- Left Wing (Cyan) -->
+    <path
+        android:pathData="M 130,148 C 130,134 142,124 156,124 L 230,124 C 238,124 246,130 248,138 L 254,168 C 256,178 248,188 238,188 L 198,188 L 198,236 C 198,246 190,254 180,254 L 148,254 C 138,254 130,246 130,236 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="130"
+                android:startY="124"
+                android:endX="254"
+                android:endY="254"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF38BDF8" />
+                <item android:offset="0.4" android:color="#FF00E5FF" />
+                <item android:offset="1.0" android:color="#FF0284C7" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Right Wing (Orange) -->
+    <path
+        android:pathData="M 282,124 L 356,124 C 370,124 382,134 382,148 L 382,236 C 382,246 374,254 364,254 L 332,254 C 322,254 314,246 314,236 L 314,188 L 274,188 C 264,188 256,178 258,168 L 264,138 C 266,130 274,124 282,124 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="258"
+                android:startY="124"
+                android:endX="382"
+                android:endY="254"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFDE047" />
+                <item android:offset="0.5" android:color="#FFFB923C" />
+                <item android:offset="1.0" android:color="#FFEA580C" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Cyan Flow Arc -->
+    <path
+        android:pathData="M 112,300 C 112,370 180,420 270,412 C 340,406 394,360 420,310"
+        android:strokeWidth="16"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="112"
+                android:startY="300"
+                android:endX="420"
+                android:endY="412"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF38BDF8" />
+                <item android:offset="1.0" android:color="#FF00E5FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M 404,290 L 434,310 L 400,334 Z"
+        android:fillColor="#FF00E5FF" />
+
+    <!-- Orange Counter Flow Arc -->
+    <path
+        android:pathData="M 148,340 C 180,388 240,428 320,428 C 366,428 408,406 434,372"
+        android:strokeWidth="10"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="148"
+                android:startY="340"
+                android:endX="434"
+                android:endY="428"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFDE047" />
+                <item android:offset="1.0" android:color="#FFFB923C" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M 424,354 L 448,370 L 424,388 Z"
+        android:fillColor="#FFFB923C" />
+
+    <!-- Central Lightning Bolt Core -->
+    <path
+        android:pathData="M 286,78 C 288,70 278,64 272,70 L 186,218 C 182,226 188,236 198,236 L 254,236 L 208,424 C 204,436 220,442 226,432 L 334,250 C 338,242 332,232 322,232 L 266,232 L 298,84 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="186"
+                android:startY="70"
+                android:endX="334"
+                android:endY="442"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFFFFF" />
+                <item android:offset="0.35" android:color="#FFBAE6FD" />
+                <item android:offset="0.7" android:color="#FF38BDF8" />
+                <item android:offset="1.0" android:color="#FF00B0FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

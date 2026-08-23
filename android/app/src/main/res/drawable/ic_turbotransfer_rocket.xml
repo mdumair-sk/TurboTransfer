@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="200dp"
+    android:height="200dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <!-- Base Squircle -->
+    <path
+        android:pathData="M 128,20 L 384,20 C 444,20 492,68 492,128 L 492,384 C 492,444 444,492 384,492 L 128,492 C 68,492 20,444 20,384 L 20,128 C 20,68 68,20 128,20 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="0"
+                android:startY="0"
+                android:endX="512"
+                android:endY="512"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF0B0F19" />
+                <item android:offset="0.5" android:color="#FF141E33" />
+                <item android:offset="1.0" android:color="#FF080B14" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Wi-Fi Pulse Arcs -->
+    <path
+        android:pathData="M 330,110 C 370,120 400,150 410,190"
+        android:strokeWidth="12"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="330"
+                android:startY="110"
+                android:endX="410"
+                android:endY="190"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF00E5FF" />
+                <item android:offset="1.0" android:color="#FF0284C7" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <path
+        android:pathData="M 360,80 C 420,100 450,140 460,200"
+        android:strokeWidth="14"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="360"
+                android:startY="80"
+                android:endX="460"
+                android:endY="200"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF00E5FF" />
+                <item android:offset="1.0" android:color="#FF0284C7" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Flames -->
+    <path
+        android:pathData="M 190,320 L 100,410 C 90,420 70,410 80,390 L 130,340 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="190"
+                android:startY="320"
+                android:endX="80"
+                android:endY="410"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFEF08A" />
+                <item android:offset="0.3" android:color="#FFF97316" />
+                <item android:offset="1.0" android:color="#FFEF4444" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Fins -->
+    <path
+        android:pathData="M 180,300 L 130,320 C 120,324 120,338 130,342 L 180,330 Z"
+        android:fillColor="#FF0284C7" />
+    <path
+        android:pathData="M 280,200 L 330,250 C 338,258 334,270 322,270 L 250,270 Z"
+        android:fillColor="#FF0284C7" />
+
+    <!-- Rocket Body -->
+    <path
+        android:pathData="M 190,330 C 230,310 290,250 330,190 C 360,140 370,110 370,110 C 370,110 340,120 290,150 C 230,190 170,250 150,290 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="150"
+                android:startY="110"
+                android:endX="370"
+                android:endY="330"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFFFFF" />
+                <item android:offset="0.4" android:color="#FFE2E8F0" />
+                <item android:offset="0.8" android:color="#FF94A3B8" />
+                <item android:offset="1.0" android:color="#FF64748B" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Nose Cone -->
+    <path
+        android:pathData="M 330,150 C 350,130 370,110 370,110 C 370,110 350,130 330,150 Z"
+        android:fillColor="#FF0284C7" />
+
+    <!-- Porthole Window -->
+    <path
+        android:pathData="M 280,200 m -20,0 a 20,20 0 1,0 40,0 a 20,20 0 1,0 -40,0"
+        android:fillColor="#FF0F172A"
+        android:strokeWidth="4"
+        android:strokeColor="#FF38BDF8" />
+    <path
+        android:pathData="M 280,200 m -12,0 a 12,12 0 1,0 24,0 a 12,12 0 1,0 -24,0"
+        android:fillColor="#FF00E5FF" />
+</vector>

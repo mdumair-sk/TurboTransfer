@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Left Wing (Cyan) -->
+    <path
+        android:pathData="M 33,38 C 33,35 35,33 38,33 L 51,33 C 53,33 54,34 55,36 L 56,41 C 57,43 55,45 53,45 L 46,45 L 46,54 C 46,56 44,58 42,58 L 36,58 C 34,58 33,56 33,54 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="33"
+                android:startY="33"
+                android:endX="56"
+                android:endY="58"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF38BDF8" />
+                <item android:offset="0.5" android:color="#FF00E5FF" />
+                <item android:offset="1.0" android:color="#FF0284C7" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Right Wing (Orange) -->
+    <path
+        android:pathData="M 57,33 L 70,33 C 73,33 75,35 75,38 L 75,54 C 75,56 73,58 71,58 L 65,58 C 63,58 61,56 61,54 L 61,45 L 54,45 C 52,45 51,43 51,41 L 52,36 C 53,34 54,33 57,33 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="51"
+                android:startY="33"
+                android:endX="75"
+                android:endY="58"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFDE047" />
+                <item android:offset="0.5" android:color="#FFFB923C" />
+                <item android:offset="1.0" android:color="#FFEA580C" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- High-Speed Dynamic Flow Waves (Cyan Arc & Arrow) -->
+    <path
+        android:pathData="M 28,64 C 28,77 40,86 58,85 C 72,84 82,75 88,65"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="28"
+                android:startY="64"
+                android:endX="88"
+                android:endY="85"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF38BDF8" />
+                <item android:offset="1.0" android:color="#FF00E5FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M 85,61 L 91,65 L 84,70 Z"
+        android:fillColor="#FF00E5FF" />
+
+    <!-- Orange Counter Flow Arc -->
+    <path
+        android:pathData="M 36,72 C 43,81 54,88 70,88 C 78,88 86,84 91,77"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="36"
+                android:startY="72"
+                android:endX="91"
+                android:endY="88"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFDE047" />
+                <item android:offset="1.0" android:color="#FFFB923C" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M 89,74 L 94,77 L 89,80 Z"
+        android:fillColor="#FFFB923C" />
+
+    <!-- Central Lightning Bolt Core (Supersonic Turbo Punch) -->
+    <path
+        android:pathData="M 60,24 C 61,22 59,21 57,22 L 42,47 C 41,49 42,51 44,51 L 54,51 L 46,86 C 45,88 48,90 49,88 L 68,54 C 69,52 68,50 66,50 L 56,50 L 62,25 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="42"
+                android:startY="21"
+                android:endX="68"
+                android:endY="88"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFFFFF" />
+                <item android:offset="0.3" android:color="#FFBAE6FD" />
+                <item android:offset="0.7" android:color="#FF38BDF8" />
+                <item android:offset="1.0" android:color="#FF00B0FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Spark highlight -->
+    <path
+        android:pathData="M 56,50 L 61,28 L 57,46 Z"
+        android:fillColor="#80FFFFFF" />
+</vector>

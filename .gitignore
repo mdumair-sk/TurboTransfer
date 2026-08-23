@@ -1,0 +1,65 @@
+# Rust & Cargo
+target/
+**/target/
+**/*.rs.bk
+
+# Compiled Binaries & Debug Symbols
+*.exe
+*.pdb
+*.ilk
+*.obj
+*.o
+*.lib
+*.exp
+*.dll
+
+# Android & Gradle
+.gradle/
+**/.gradle/
+build/
+**/build/
+local.properties
+**/local.properties
+.kotlin/
+**/.kotlin/
+.cxx/
+**/.cxx/
+.externalNativeBuild/
+captures/
+*.apk
+*.ap_
+*.aab
+*.aar
+*.dex
+*.class
+*.keystore
+*.jks
+hs_err_pid*
+
+# Keep UniFFI JNI libraries tracked
+!android/app/src/main/jniLibs/**
+
+# Application Runtime Output
+received_files/
+*.log
+
+# IDE & Editor Files
+.idea/
+**/.idea/
+.vscode/
+**/.vscode/
+*.iml
+**/*.iml
+*.ipr
+*.iws
+*.swp
+*~
+*.bak
+*.tmp
+.DS_Store
+
+# OS Generated
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
