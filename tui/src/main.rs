@@ -12,48 +12,29 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io::stdout;
 use std::time::{Duration, Instant};
 use turbotransfer_core::transfer::leave_receive_mode;
-use turbotransfer_core::transport::{UsbTransport, WifiDirectTransport};
 
 use app::AppState;
 use events::handle_key_event;
 use ui::render_ui;
 
-/// Centralized cleanup to guarantee rollback of network & ADB state upon exit.
-fn perform_cleanup(original_wifi: Option<&str>) {
-    // 1. Revert USB tethering if active
-    let _ = UsbTransport::stop_usb_tethering(None);
-
-    // 2. Reconnect Windows to original Wi-Fi network if known
-    if let Some(ssid) = original_wifi {
-        let _ = WifiDirectTransport::reconnect_windows_wifi(ssid);
-    }
-
-    // 3. Stop all core transfer listeners
+/// Centralized cleanup to guarantee rollback of receiver state upon exit.
+fn perform_cleanup() {
+    // Stop all core transfer listeners
     let _ = leave_receive_mode(None);
-
-    // 4. Kill ADB server instances
-    let _ = UsbTransport::kill_adb_server();
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 0. Capture initial Wi-Fi SSID for restoration on exit
-    let original_wifi = WifiDirectTransport::get_current_windows_wifi_ssid();
-
-    // Reset ADB server to ensure clean state
-    let _ = UsbTransport::reset_adb_server();
-
     // Set panic hook to ensure terminal restoration and clean exit
-    let orig_wifi_panic = original_wifi.clone();
     let default_panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
         let _ = execute!(stdout(), LeaveAlternateScreen);
-        perform_cleanup(orig_wifi_panic.as_deref());
+        perform_cleanup();
         default_panic(info);
     }));
 
-    // 1. Initialize Terminal
+    // 1. Initialize Terminal immediately (<1ms)
     enable_raw_mode()?;
     let mut stdout = stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -112,7 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
-    perform_cleanup(original_wifi.as_deref());
+    perform_cleanup();
 
     Ok(())
 }

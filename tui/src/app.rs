@@ -244,7 +244,6 @@ impl AppState {
         };
 
         app.refresh_browser_entries();
-        app.refresh_transfers();
 
         #[cfg(not(target_os = "android"))]
         {
@@ -391,19 +390,22 @@ impl AppState {
 
     /// Polls Transfer API `get_progress()` on the 250ms tick (§13).
     pub fn poll_active_progress(&mut self) {
-        self.refresh_transfers();
+        if self.current_screen == Screen::Transfers || self.current_screen == Screen::Resume {
+            self.refresh_transfers();
+        } else if self.is_receiving || self.current_screen == Screen::TransferScreen {
+            self.refresh_transfers();
+            let in_progress_id = self.cached_transfers.iter().find(|t| t.status == TransferStatus::InProgress).map(|t| t.transfer_id);
 
-        let in_progress_id = self.cached_transfers.iter().find(|t| t.status == TransferStatus::InProgress).map(|t| t.transfer_id);
+            if let Some(in_prog) = in_progress_id {
+                let current_is_done = self.active_progress.as_ref().map_or(true, |p| {
+                    p.status == TransferStatus::Completed || p.status == TransferStatus::Failed || p.status == TransferStatus::Cancelled
+                });
 
-        if let Some(in_prog) = in_progress_id {
-            let current_is_done = self.active_progress.as_ref().map_or(true, |p| {
-                p.status == TransferStatus::Completed || p.status == TransferStatus::Failed || p.status == TransferStatus::Cancelled
-            });
-
-            if self.active_transfer_id != Some(in_prog) && (current_is_done || self.active_transfer_id.is_none()) {
-                self.active_transfer_id = Some(in_prog);
-                if self.current_screen == Screen::ReceiveFiles {
-                    self.navigate_to(Screen::TransferScreen);
+                if self.active_transfer_id != Some(in_prog) && (current_is_done || self.active_transfer_id.is_none()) {
+                    self.active_transfer_id = Some(in_prog);
+                    if self.current_screen == Screen::ReceiveFiles {
+                        self.navigate_to(Screen::TransferScreen);
+                    }
                 }
             }
         }
@@ -413,7 +415,9 @@ impl AppState {
                 if p.status == TransferStatus::Completed {
                     self.status_message = Some(format!("Completed: {} (100%)", p.file_name));
                 } else if p.status == TransferStatus::Failed {
-                    self.status_message = Some(format!("Failed: {}", p.file_name));
+                    let err = turbotransfer_core::transfer::get_transfer_error(id)
+                        .unwrap_or_else(|| "Unknown error".to_string());
+                    self.status_message = Some(format!("Failed: {} ({})", p.file_name, err));
                 }
                 self.active_progress = Some(p);
             }
@@ -531,6 +535,7 @@ impl AppState {
 
         match screen {
             Screen::ReceiveFiles => self.start_receive_mode(),
+            Screen::DeviceSelection | Screen::Devices => self.refresh_devices(),
             Screen::Transfers | Screen::Resume => self.refresh_transfers(),
             Screen::TransferScreen | Screen::TransferDetails => self.poll_active_progress(),
             _ => {}
