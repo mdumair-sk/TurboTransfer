@@ -1,7 +1,9 @@
-package com.turbotransfer
+package com.turbotransfer.data.source.local
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.turbotransfer.UriUtils
+import com.turbotransfer.domain.model.HistoryItem
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
@@ -9,54 +11,42 @@ import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import dagger.hilt.android.qualifiers.ApplicationContext
+import javax.inject.Inject
+import javax.inject.Singleton
 
-data class TransferHistoryItem(
-    val id: String,
-    val fileName: String,
-    val fileSize: Long,
-    val formattedSize: String,
-    val filePath: String,
-    val isOutgoing: Boolean, // true = Sent, false = Received
-    val timestamp: Long,
-    val formattedDate: String,
-    val durationMs: Long,
-    val avgSpeedMBps: Double,
-    val peakSpeedMBps: Double,
-    val usbSpeedMBps: Double,
-    val wifiSpeedMBps: Double,
-    val status: String // Completed, Failed, Cancelled
-)
+@Singleton
+class HistoryLocalDataSource @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
+    private val prefsName = "turbotransfer_history"
+    private val keyHistory = "history_json"
 
-object TransferHistoryManager {
-
-    private const val PREFS_NAME = "turbotransfer_history"
-    private const val KEY_HISTORY = "history_json"
-
-    private val _historyFlow = MutableStateFlow<List<TransferHistoryItem>>(emptyList())
+    private val _historyFlow = MutableStateFlow<List<HistoryItem>>(emptyList())
     val historyFlow = _historyFlow.asStateFlow()
 
-    private var prefs: SharedPreferences? = null
+    private val prefs: SharedPreferences by lazy {
+        context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+    }
 
-    fun init(context: Context) {
-        if (prefs == null) {
-            prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            loadHistory()
-        }
+    init {
+        loadHistory()
     }
 
     private fun loadHistory() {
-        val raw = prefs?.getString(KEY_HISTORY, "[]") ?: "[]"
+        val raw = prefs.getString(keyHistory, "[]") ?: "[]"
         try {
             val arr = JSONArray(raw)
-            val list = mutableListOf<TransferHistoryItem>()
+            val list = mutableListOf<HistoryItem>()
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
+                val fileSize = obj.optLong("fileSize", 0L)
                 list.add(
-                    TransferHistoryItem(
+                    HistoryItem(
                         id = obj.optString("id", ""),
                         fileName = obj.optString("fileName", "Unknown File"),
-                        fileSize = obj.optLong("fileSize", 0L),
-                        formattedSize = obj.optString("formattedSize", UriUtils.formatFileSize(obj.optLong("fileSize", 0L))),
+                        fileSize = fileSize,
+                        formattedSize = obj.optString("formattedSize", UriUtils.formatFileSize(fileSize)),
                         filePath = obj.optString("filePath", ""),
                         isOutgoing = obj.optBoolean("isOutgoing", true),
                         timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
@@ -77,52 +67,17 @@ object TransferHistoryManager {
     }
 
     @Synchronized
-    fun addTransferRecord(
-        id: String,
-        fileName: String,
-        fileSize: Long,
-        filePath: String,
-        isOutgoing: Boolean,
-        durationMs: Long,
-        avgSpeedMBps: Double,
-        peakSpeedMBps: Double,
-        usbSpeedMBps: Double,
-        wifiSpeedMBps: Double,
-        status: String
-    ) {
-        val now = System.currentTimeMillis()
-        val sdf = SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault())
-        val formattedDate = sdf.format(Date(now))
-
-        val item = TransferHistoryItem(
-            id = id,
-            fileName = fileName,
-            fileSize = fileSize,
-            formattedSize = UriUtils.formatFileSize(fileSize),
-            filePath = filePath,
-            isOutgoing = isOutgoing,
-            timestamp = now,
-            formattedDate = formattedDate,
-            durationMs = durationMs,
-            avgSpeedMBps = avgSpeedMBps,
-            peakSpeedMBps = peakSpeedMBps,
-            usbSpeedMBps = usbSpeedMBps,
-            wifiSpeedMBps = wifiSpeedMBps,
-            status = status
-        )
-
+    fun addTransferRecord(record: HistoryItem) {
         val currentList = _historyFlow.value.toMutableList()
-        // Deduplicate if same ID exists
-        currentList.removeAll { it.id == id }
-        currentList.add(0, item) // newest first
+        currentList.removeAll { it.id == record.id }
+        currentList.add(0, record)
 
-        // Keep maximum 100 history items
         val trimmed = if (currentList.size > 100) currentList.subList(0, 100) else currentList
         _historyFlow.value = trimmed
         saveHistory(trimmed)
     }
 
-    private fun saveHistory(list: List<TransferHistoryItem>) {
+    private fun saveHistory(list: List<HistoryItem>) {
         try {
             val arr = JSONArray()
             for (item in list) {
@@ -144,7 +99,7 @@ object TransferHistoryManager {
                 }
                 arr.put(obj)
             }
-            prefs?.edit()?.putString(KEY_HISTORY, arr.toString())?.apply()
+            prefs.edit().putString(keyHistory, arr.toString()).apply()
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -161,6 +116,6 @@ object TransferHistoryManager {
     @Synchronized
     fun clearHistory() {
         _historyFlow.value = emptyList()
-        prefs?.edit()?.remove(KEY_HISTORY)?.apply()
+        prefs.edit().remove(keyHistory).apply()
     }
 }
