@@ -3,6 +3,6 @@ pub mod schema;
 
 pub use actor::{ActorMessage, MetaActor, MetaActorHandle, TransportType};
 pub use schema::{
-    coalesce_ranges, expand_ranges, generate_manifest, FileManifest, TransferMeta, TransferRole,
-    TransferStatus, TransportStats, TransportStatsMap,
+    coalesce_ranges, expand_ranges, generate_manifest, generate_manifest_with_name, FileManifest,
+    TransferMeta, TransferRole, TransferStatus, TransportStats, TransportStatsMap,
 };

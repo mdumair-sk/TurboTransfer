@@ -13,7 +13,7 @@ interface TransferRepository {
     val receiveDestDirFlow: StateFlow<String>
 
     fun setReceiveDestDir(path: String)
-    suspend fun startTransfer(filePath: String, address: String?): Resource<String>
+    suspend fun startTransfer(filePath: String, address: String?, fileName: String? = null): Resource<String>
     fun observeTransferProgress(transferId: String): Flow<TransferProgressInfo?>
     suspend fun enterReceiveMode(destDir: String, address: String?): Resource<String>
     suspend fun stopReceiveMode(): Boolean

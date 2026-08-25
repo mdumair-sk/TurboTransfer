@@ -375,7 +375,7 @@ impl AppState {
         let path_clone = file_path.clone();
 
         tokio::spawn(async move {
-            let _ = start_transfer(path_clone, target_device_id, pref, None).await;
+            let _ = start_transfer(path_clone, None, target_device_id, pref, None).await;
         });
 
         self.refresh_transfers();

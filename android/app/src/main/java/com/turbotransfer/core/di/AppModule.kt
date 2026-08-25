@@ -1,7 +1,6 @@
 package com.turbotransfer.core.di
 
 import android.content.Context
-import com.turbotransfer.WifiDirectSpikeManager
 import com.turbotransfer.WifiHotspotManager
 import com.turbotransfer.core.common.DefaultDispatcherProvider
 import com.turbotransfer.core.common.DispatcherProvider
@@ -33,11 +32,5 @@ object AppModule {
     @Singleton
     fun provideWifiHotspotManager(@ApplicationContext context: Context): WifiHotspotManager {
         return WifiHotspotManager(context)
-    }
-
-    @Provides
-    @Singleton
-    fun provideWifiDirectSpikeManager(@ApplicationContext context: Context): WifiDirectSpikeManager {
-        return WifiDirectSpikeManager(context)
     }
 }

@@ -102,7 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             address,
         } => {
             println!("Starting transfer for: {}", path.display());
-            let handle = start_transfer(path, device, transport.into(), address).await?;
+            let handle = start_transfer(path, None, device, transport.into(), address).await?;
             println!("Transfer initiated with ID: {}", handle.transfer_id);
             println!("Streaming chunks to device...");
 

@@ -1,22 +1,18 @@
 package com.turbotransfer.presentation.settings
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.turbotransfer.WifiDirectSpikeManager
 import com.turbotransfer.domain.usecase.discovery.GetUsbSpeedLabelUseCase
 import com.turbotransfer.domain.usecase.settings.GetSettingsUseCase
 import com.turbotransfer.domain.usecase.settings.UpdateSettingsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val getSettingsUseCase: GetSettingsUseCase,
     private val updateSettingsUseCase: UpdateSettingsUseCase,
-    private val getUsbSpeedLabelUseCase: GetUsbSpeedLabelUseCase,
-    private val spikeManager: WifiDirectSpikeManager
+    private val getUsbSpeedLabelUseCase: GetUsbSpeedLabelUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -30,12 +26,6 @@ class SettingsViewModel @Inject constructor(
                 autoWakeLock = getSettingsUseCase.isAutoWakeLockEnabled(),
                 usbLabel = getUsbSpeedLabelUseCase()
             )
-        }
-
-        viewModelScope.launch {
-            spikeManager.state.collect { spikeState ->
-                _uiState.update { it.copy(spikeState = spikeState) }
-            }
         }
     }
 
@@ -52,22 +42,6 @@ class SettingsViewModel @Inject constructor(
     fun setAutoWakeLock(enabled: Boolean) {
         updateSettingsUseCase.setAutoWakeLockEnabled(enabled)
         _uiState.update { it.copy(autoWakeLock = enabled) }
-    }
-
-    fun toggleShowDiagnostics() {
-        _uiState.update { it.copy(showDiagnostics = !it.showDiagnostics) }
-    }
-
-    fun createP2pGroup() {
-        spikeManager.createP2pGroup { _, msg ->
-            _uiState.update { it.copy(userMessage = msg) }
-        }
-    }
-
-    fun removeP2pGroup() {
-        spikeManager.removeP2pGroup { _, _ -> }
-        spikeManager.stopLocalOnlyHotspot()
-        _uiState.update { it.copy(userMessage = "Stopped P2P Group and Hotspot") }
     }
 
     fun clearUserMessage() {

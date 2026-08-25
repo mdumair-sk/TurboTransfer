@@ -3,19 +3,15 @@ package com.turbotransfer.presentation.settings
 import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -35,8 +31,6 @@ fun SettingsScreen(
             viewModel.clearUserMessage()
         }
     }
-
-    val spikeState = uiState.spikeState
 
     LazyColumn(
         modifier = Modifier
@@ -130,80 +124,6 @@ fun SettingsScreen(
                             checked = uiState.autoWakeLock,
                             onCheckedChange = { viewModel.setAutoWakeLock(it) }
                         )
-                    }
-                }
-            }
-        }
-
-        // 3. Collapsible Developer Diagnostics & Wi-Fi Spike Tools
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { viewModel.toggleShowDiagnostics() },
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Default.BugReport, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            Text("Developer Diagnostics & M7a Tools", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        }
-                        Icon(
-                            imageVector = if (uiState.showDiagnostics) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = null
-                        )
-                    }
-
-                    if (uiState.showDiagnostics) {
-                        HorizontalDivider()
-
-                        Text("Wi-Fi Direct P2P Group Owner Tool", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        Text(
-                            text = if (spikeState.isGroupOwner) "● P2P Group Active (Group Owner)" else "○ P2P Group Inactive",
-                            fontWeight = FontWeight.Bold,
-                            color = if (spikeState.isGroupOwner) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 12.sp
-                        )
-
-                        if (spikeState.ssid != null) {
-                            Text("SSID: ${spikeState.ssid}", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                            Text("Password: ${spikeState.passphrase}", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = { viewModel.createP2pGroup() },
-                                modifier = Modifier.weight(1f),
-                                enabled = !spikeState.isGroupOwner,
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text("P2P Group", fontSize = 12.sp)
-                            }
-                            Button(
-                                onClick = { viewModel.removeP2pGroup() },
-                                modifier = Modifier.weight(1f),
-                                enabled = spikeState.isGroupOwner,
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text("Stop", fontSize = 12.sp)
-                            }
-                        }
-
-                        Text("Echo Server Status: ${if (spikeState.isServerRunning) "Running on :${spikeState.echoPort}" else "Stopped"}", fontSize = 12.sp)
-                        Text("Echo packets received: ${spikeState.echoPacketsReceived}", fontSize = 12.sp)
                     }
                 }
             }

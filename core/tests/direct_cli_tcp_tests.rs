@@ -37,6 +37,7 @@ async fn test_tcp_file_transfer_loopback() {
     let handle = start_transfer(
         src_file_path.clone(),
         None,
+        None,
         TransportPreference::Automatic,
         Some(listen_addr.clone()),
     )
@@ -103,6 +104,7 @@ async fn test_tcp_sequential_multi_file_transfers_same_listener() {
     let handle1 = start_transfer(
         file1_path.clone(),
         None,
+        None,
         TransportPreference::Automatic,
         Some(listen_addr.clone()),
     )
@@ -124,6 +126,7 @@ async fn test_tcp_sequential_multi_file_transfers_same_listener() {
     // 3. Immediately Transfer File 2 without restarting the receiver
     let handle2 = start_transfer(
         file2_path.clone(),
+        None,
         None,
         TransportPreference::Automatic,
         Some(listen_addr.clone()),

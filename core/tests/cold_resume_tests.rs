@@ -137,6 +137,7 @@ async fn test_cold_resume_process_restart_mid_transfer() {
             chunk_size as u32,
             transfer_id,
             sender_transport,
+            None,
         )
         .await
     });

@@ -239,6 +239,7 @@ pub fn update_transfer_transport_name(transfer_id: Uuid, name: String) {
 /// Starts a file transfer to a peer over `TcpTransport` or `UsbTransport` (§6, §7, §8).
 pub async fn start_transfer(
     file_path: PathBuf,
+    custom_file_name: Option<String>,
     device_id: Option<Uuid>,
     transport_pref: TransportPreference,
     address: Option<String>,
@@ -248,12 +249,14 @@ pub async fn start_transfer(
     let transfer_id = Uuid::new_v4();
     let chunk_size = 4 * 1024 * 1024; // 4 MiB chunks for high throughput and granular real-time progress updates
 
-    let resolved_path = std::fs::read_link(&file_path).unwrap_or_else(|_| file_path.clone());
-    let file_name = resolved_path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("file")
-        .to_string();
+    let file_name = custom_file_name.clone().unwrap_or_else(|| {
+        let resolved_path = std::fs::read_link(&file_path).unwrap_or_else(|_| file_path.clone());
+        resolved_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("file")
+            .to_string()
+    });
     let file_size = match std::fs::metadata(&file_path) {
         Ok(m) => m.len(),
         Err(e) => return Err(TransferSessionError::Io(e)),
@@ -477,6 +480,7 @@ pub async fn start_transfer(
             chunk_size,
             transfer_id,
             transports,
+            custom_file_name.as_deref(),
         )
         .await;
 
@@ -957,6 +961,7 @@ pub async fn resume_transfer(
 
     let sender_id = Uuid::new_v4();
     let file_path = PathBuf::from(&meta.file_name);
+    let custom_name = meta.file_name.clone();
     let chunk_size = meta.chunk_size;
 
     tokio::spawn(async move {
@@ -967,6 +972,7 @@ pub async fn resume_transfer(
             chunk_size,
             tid,
             transport,
+            Some(&custom_name),
         )
         .await;
     });

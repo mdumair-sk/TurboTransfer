@@ -136,6 +136,7 @@ fn get_runtime() -> &'static tokio::runtime::Runtime {
 #[uniffi::export]
 pub fn start_transfer(
     file_path: String,
+    file_name: Option<String>,
     device_id: Option<String>,
     transport_pref: FfiTransportPreference,
     address: Option<String>,
@@ -144,7 +145,7 @@ pub fn start_transfer(
     let path = PathBuf::from(file_path);
     let dev_id = device_id.and_then(|s| Uuid::parse_str(&s).ok());
     let handle = rt.block_on(async {
-        api_start_transfer(path, dev_id, transport_pref.into(), address).await
+        api_start_transfer(path, file_name, dev_id, transport_pref.into(), address).await
     }).map_err(|e| FfiTransferError::Generic {
         msg: e.to_string(),
     })?;

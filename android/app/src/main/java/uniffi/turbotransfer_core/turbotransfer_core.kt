@@ -758,7 +758,7 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_turbotransfer_core_fn_func_resume_transfer(`transferId`: RustBuffer.ByValue,`transportPref`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_turbotransfer_core_fn_func_start_transfer(`filePath`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`transportPref`: RustBuffer.ByValue,`address`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_turbotransfer_core_fn_func_start_transfer(`filePath`: RustBuffer.ByValue,`fileName`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`transportPref`: RustBuffer.ByValue,`address`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_turbotransfer_core_fn_func_stop_receive_mode(uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
@@ -930,7 +930,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_turbotransfer_core_checksum_func_resume_transfer() != 47857.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_turbotransfer_core_checksum_func_start_transfer() != 52497.toShort()) {
+    if (lib.uniffi_turbotransfer_core_checksum_func_start_transfer() != 54351.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_turbotransfer_core_checksum_func_stop_receive_mode() != 23398.toShort()) {
@@ -1763,11 +1763,11 @@ public object FfiConverterSequenceTypeFfiTransferSummary: FfiConverterRustBuffer
     }
     
 
-    @Throws(FfiTransferException::class) fun `startTransfer`(`filePath`: kotlin.String, `deviceId`: kotlin.String?, `transportPref`: FfiTransportPreference, `address`: kotlin.String?): FfiTransferHandle {
+    @Throws(FfiTransferException::class) fun `startTransfer`(`filePath`: kotlin.String, `fileName`: kotlin.String?, `deviceId`: kotlin.String?, `transportPref`: FfiTransportPreference, `address`: kotlin.String?): FfiTransferHandle {
             return FfiConverterTypeFfiTransferHandle.lift(
     uniffiRustCallWithError(FfiTransferException) { _status ->
     UniffiLib.INSTANCE.uniffi_turbotransfer_core_fn_func_start_transfer(
-        FfiConverterString.lower(`filePath`),FfiConverterOptionalString.lower(`deviceId`),FfiConverterTypeFfiTransportPreference.lower(`transportPref`),FfiConverterOptionalString.lower(`address`),_status)
+        FfiConverterString.lower(`filePath`),FfiConverterOptionalString.lower(`fileName`),FfiConverterOptionalString.lower(`deviceId`),FfiConverterTypeFfiTransportPreference.lower(`transportPref`),FfiConverterOptionalString.lower(`address`),_status)
 }
     )
     }

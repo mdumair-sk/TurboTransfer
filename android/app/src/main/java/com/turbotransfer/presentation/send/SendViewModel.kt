@@ -119,7 +119,7 @@ class SendViewModel @Inject constructor(
         if (index < queue.size) {
             val item = queue[index]
             viewModelScope.launch {
-                val res = startTransferUseCase(item.path, targetAddress)
+                val res = startTransferUseCase(item.path, targetAddress, item.displayName)
                 when (res) {
                     is Resource.Success -> {
                         _uiState.update { it.copy(currentQueueIndex = index) }

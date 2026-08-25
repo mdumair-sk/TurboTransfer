@@ -134,6 +134,15 @@ pub fn generate_manifest<P: AsRef<std::path::Path>>(
     file_path: P,
     chunk_size: u32,
 ) -> Result<FileManifest, std::io::Error> {
+    generate_manifest_with_name(file_path, chunk_size, None)
+}
+
+/// Generates a `FileManifest` for the file at `file_path` with an optional custom file name.
+pub fn generate_manifest_with_name<P: AsRef<std::path::Path>>(
+    file_path: P,
+    chunk_size: u32,
+    custom_file_name: Option<&str>,
+) -> Result<FileManifest, std::io::Error> {
     use std::io::Seek;
     let path = file_path.as_ref();
     let mut file = std::fs::File::open(path)?;
@@ -141,12 +150,17 @@ pub fn generate_manifest<P: AsRef<std::path::Path>>(
         Ok(m) if m.len() > 0 => m.len(),
         _ => file.seek(std::io::SeekFrom::End(0))?,
     };
-    let resolved_path = std::fs::read_link(path).unwrap_or_else(|_| path.to_path_buf());
-    let file_name = resolved_path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown")
-        .to_string();
+    let file_name = match custom_file_name {
+        Some(name) => name.to_string(),
+        None => {
+            let resolved_path = std::fs::read_link(path).unwrap_or_else(|_| path.to_path_buf());
+            resolved_path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown")
+                .to_string()
+        }
+    };
 
     let num_chunks = crate::chunk::total_chunks(file_size, chunk_size);
     let file_id = Uuid::new_v4();

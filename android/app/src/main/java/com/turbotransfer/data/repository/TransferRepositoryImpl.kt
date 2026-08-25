@@ -57,21 +57,23 @@ class TransferRepositoryImpl @Inject constructor(
         _activeSessionFlow.value = null
     }
 
-    override suspend fun startTransfer(filePath: String, address: String?): Resource<String> {
+    override suspend fun startTransfer(filePath: String, address: String?, fileName: String?): Resource<String> {
         val result = rustCoreDataSource.startTransfer(
             filePath = filePath,
+            fileName = fileName,
             deviceId = null,
             transportPref = FfiTransportPreference.AUTOMATIC,
             address = address?.ifBlank { null }
         )
         return result.fold(
             onSuccess = { transferId ->
-                val file = File(filePath)
+                val name = fileName ?: File(filePath).name
+                val size = if (File(filePath).exists()) File(filePath).length() else 0L
                 val session = TransferSession(
                     transferId = transferId,
-                    fileName = file.name,
-                    fileSize = file.length(),
-                    formattedSize = UriUtils.formatFileSize(file.length()),
+                    fileName = name,
+                    fileSize = size,
+                    formattedSize = UriUtils.formatFileSize(size),
                     filePath = filePath,
                     isOutgoing = true
                 )

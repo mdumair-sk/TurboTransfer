@@ -7,8 +7,8 @@ import javax.inject.Inject
 class StartTransferUseCase @Inject constructor(
     private val transferRepository: TransferRepository
 ) {
-    suspend operator fun invoke(filePath: String, address: String?): Resource<String> {
-        return transferRepository.startTransfer(filePath, address)
+    suspend operator fun invoke(filePath: String, address: String?, fileName: String? = null): Resource<String> {
+        return transferRepository.startTransfer(filePath, address, fileName)
     }
 }
 

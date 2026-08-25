@@ -10,7 +10,7 @@ use super::api::{
 use super::tracker::ChunkTracker;
 use crate::checksum::{compute_file_crc32c, compute_xxhash64};
 use crate::chunk::{calculate_chunk_plan, read_chunk_at};
-use crate::manifest::{generate_manifest, TransferRole, TransferStatus};
+use crate::manifest::{generate_manifest_with_name, TransferRole, TransferStatus};
 use crate::protocol::{
     encode_frame, ChunkAckData, ChunkDataPayload, ChunkNackData, CompleteData,
     HelloData, Message, ProtocolError, TransferAcceptData, TransferOfferData,
@@ -124,6 +124,7 @@ pub async fn send_file_session<T>(
     chunk_size: u32,
     transfer_id: Uuid,
     mut transport: T,
+    custom_file_name: Option<&str>,
 ) -> Result<(), TransferSessionError>
 where
     T: Transport,
@@ -151,7 +152,7 @@ where
     }
 
     // 3. Send TransferOffer
-    let manifest = generate_manifest(file_path, chunk_size)?;
+    let manifest = generate_manifest_with_name(file_path, chunk_size, custom_file_name)?;
     let offer = Message::TransferOffer(TransferOfferData {
         transfer_id,
         file_id: manifest.file_id,
@@ -429,6 +430,7 @@ pub async fn send_file_session_multipath(
     chunk_size: u32,
     transfer_id: Uuid,
     mut transports: Vec<Box<dyn Transport>>,
+    custom_file_name: Option<&str>,
 ) -> Result<(), TransferSessionError> {
     if transports.is_empty() {
         return Err(TransferSessionError::Transport(TransportError::Disconnected(
@@ -444,11 +446,12 @@ pub async fn send_file_session_multipath(
             chunk_size,
             transfer_id,
             transport,
+            custom_file_name,
         )
         .await;
     }
 
-    let manifest = generate_manifest(file_path, chunk_size)?;
+    let manifest = generate_manifest_with_name(file_path, chunk_size, custom_file_name)?;
     let plan = calculate_chunk_plan(manifest.file_size, manifest.chunk_size);
     let plan_map: std::collections::HashMap<u32, crate::chunk::ChunkPlanEntry> =
         plan.iter().map(|e| (e.chunk_id, e.clone())).collect();
@@ -806,6 +809,7 @@ where
         chunk_size,
         transfer_id,
         transport,
+        None,
     )
     .await
 }

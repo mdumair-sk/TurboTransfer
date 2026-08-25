@@ -48,7 +48,7 @@ class CleanArchitectureUseCasesTest {
             receiveDestDirFlow.value = path
         }
 
-        override suspend fun startTransfer(filePath: String, address: String?): Resource<String> {
+        override suspend fun startTransfer(filePath: String, address: String?, fileName: String?): Resource<String> {
             return Resource.Success("test-transfer-id-123")
         }
 

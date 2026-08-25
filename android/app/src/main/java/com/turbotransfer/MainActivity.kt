@@ -50,8 +50,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val permissionLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        Log.d("TurboTransfer", "Permissions result: $permissions")
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        requestRequiredPermissions()
 
         val filter = IntentFilter().apply {
             addAction("com.turbotransfer.START_TRANSFER")
@@ -75,6 +83,29 @@ class MainActivity : ComponentActivity() {
                     TurboTransferApp()
                 }
             }
+        }
+    }
+
+    private fun requestRequiredPermissions() {
+        val permissions = mutableListOf<String>()
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(android.Manifest.permission.READ_MEDIA_IMAGES)
+            permissions.add(android.Manifest.permission.READ_MEDIA_VIDEO)
+            permissions.add(android.Manifest.permission.READ_MEDIA_AUDIO)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                permissions.add(android.Manifest.permission.NEARBY_WIFI_DEVICES)
+            }
+        } else {
+            permissions.add(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+            permissions.add(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+        permissions.add(android.Manifest.permission.ACCESS_FINE_LOCATION)
+
+        val ungranted = permissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        if (ungranted.isNotEmpty()) {
+            permissionLauncher.launch(ungranted.toTypedArray())
         }
     }
 

@@ -1,1 +1,0 @@
-Hello TurboTransfer CLI direct transfer test! Manual verification for Milestone 5.

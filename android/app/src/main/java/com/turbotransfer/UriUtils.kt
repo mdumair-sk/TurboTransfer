@@ -49,6 +49,10 @@ object UriUtils {
                 }
             }
 
+            if (displayName.startsWith("transfer_cache_")) {
+                displayName = displayName.substringAfter("transfer_cache_")
+            }
+
             // 2. Resolve real physical filesystem path
             var realPath = getRealPathFromUri(context, uri)
 
@@ -72,14 +76,20 @@ object UriUtils {
                 }
             }
 
-            // 3. Fallback: stream to cache only if direct physical path is unavailable
+            // 3. Direct zero-copy streaming via Linux /proc/self/fd/<fd>
             if (realPath == null || !File(realPath).exists() || !File(realPath).canRead()) {
-                val cacheFile = copyUriToCache(context, uri, displayName)
-                if (cacheFile != null && cacheFile.exists()) {
-                    realPath = cacheFile.absolutePath
-                    if (sizeBytes == 0L) {
-                        sizeBytes = cacheFile.length()
+                try {
+                    val pfd = context.contentResolver.openFileDescriptor(uri, "r")
+                    if (pfd != null) {
+                        if (sizeBytes == 0L && pfd.statSize > 0L) {
+                            sizeBytes = pfd.statSize
+                        }
+                        val fd = pfd.detachFd()
+                        realPath = "/proc/self/fd/$fd"
+                        Log.i(TAG, "Zero-copy streaming via $realPath for $displayName ($sizeBytes bytes)")
                     }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to open ParcelFileDescriptor for $uri", e)
                 }
             } else {
                 if (sizeBytes == 0L) {
@@ -229,55 +239,66 @@ object UriUtils {
     private fun getRealPathFromUri(context: Context, uri: Uri): String? {
         // DocumentProvider
         if (DocumentsContract.isDocumentUri(context, uri)) {
+            val authority = uri.authority
             // ExternalStorageProvider
-            if ("com.android.externalstorage.documents" == uri.authority) {
+            if ("com.android.externalstorage.documents" == authority) {
                 val docId = DocumentsContract.getDocumentId(uri)
                 val split = docId.split(":")
-                val type = split[0]
+                val type = split.getOrNull(0) ?: ""
+                val relativePath = split.getOrNull(1).orEmpty()
 
                 if ("primary".equals(type, ignoreCase = true)) {
-                    val path = Environment.getExternalStorageDirectory().toString() + "/" + split.getOrNull(1).orEmpty()
+                    val path = Environment.getExternalStorageDirectory().toString() + "/" + relativePath
                     if (File(path).exists()) return path
                 } else {
                     // SD Card or secondary storage
-                    val path = "/storage/$type/" + split.getOrNull(1).orEmpty()
+                    val path = "/storage/$type/" + relativePath
                     if (File(path).exists()) return path
                 }
             }
             // DownloadsProvider
-            else if ("com.android.providers.downloads.documents" == uri.authority) {
+            else if ("com.android.providers.downloads.documents" == authority) {
                 val id = DocumentsContract.getDocumentId(uri)
-                if (id != null && id.startsWith("raw:")) {
-                    return id.substring(4)
-                }
-                try {
-                    val contentUri = ContentUris.withAppendedId(
-                        Uri.parse("content://downloads/public_downloads"),
-                        id.toLong()
-                    )
-                    val path = getDataColumn(context, contentUri, null, null)
-                    if (path != null && File(path).exists()) return path
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to resolve download id $id: ${e.message}")
+                if (id != null) {
+                    if (id.startsWith("raw:")) {
+                        return id.substring(4)
+                    }
+                    if (id.startsWith("msf:")) {
+                        val fileId = id.substring(4)
+                        val contentUri = MediaStore.Files.getContentUri("external")
+                        val path = getDataColumn(context, contentUri, "_id=?", arrayOf(fileId))
+                        if (path != null && File(path).exists()) return path
+                    }
+                    try {
+                        val contentUri = ContentUris.withAppendedId(
+                            Uri.parse("content://downloads/public_downloads"),
+                            id.toLong()
+                        )
+                        val path = getDataColumn(context, contentUri, null, null)
+                        if (path != null && File(path).exists()) return path
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to resolve download id $id: ${e.message}")
+                    }
                 }
             }
             // MediaProvider
-            else if ("com.android.providers.media.documents" == uri.authority) {
+            else if ("com.android.providers.media.documents" == authority) {
                 val docId = DocumentsContract.getDocumentId(uri)
                 val split = docId.split(":")
-                val type = split[0]
+                val type = split.getOrNull(0) ?: ""
+                val id = split.getOrNull(1)
 
-                val contentUri = when (type) {
+                val contentUri = when (type.lowercase()) {
                     "image" -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
                     "video" -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
                     "audio" -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
                     else -> MediaStore.Files.getContentUri("external")
                 }
 
-                val selection = "_id=?"
-                val selectionArgs = arrayOf(split.getOrNull(1) ?: return null)
-                val path = getDataColumn(context, contentUri, selection, selectionArgs)
-                if (path != null && File(path).exists()) return path
+                if (id != null) {
+                    val path = getDataColumn(context, contentUri, "_id=?", arrayOf(id))
+                    if (path != null && File(path).exists()) return path
+                }
             }
         }
         // MediaStore (general content://)
@@ -315,21 +336,5 @@ object UriUtils {
             cursor?.close()
         }
         return null
-    }
-
-    private fun copyUriToCache(context: Context, uri: Uri, fileName: String): File? {
-        return try {
-            val safeName = fileName.replace("[^a-zA-Z0-9._-]".toRegex(), "_")
-            val cacheFile = File(context.cacheDir, "transfer_cache_$safeName")
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(cacheFile).use { output ->
-                    input.copyTo(output)
-                }
-            }
-            cacheFile
-        } catch (e: Exception) {
-            Log.e(TAG, "copyUriToCache failed for $uri", e)
-            null
-        }
     }
 }

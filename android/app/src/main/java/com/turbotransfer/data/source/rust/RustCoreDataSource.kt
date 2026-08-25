@@ -14,6 +14,7 @@ class RustCoreDataSource @Inject constructor(
 ) {
     suspend fun startTransfer(
         filePath: String,
+        fileName: String? = null,
         deviceId: String? = null,
         transportPref: FfiTransportPreference = FfiTransportPreference.AUTOMATIC,
         address: String? = null
@@ -21,6 +22,7 @@ class RustCoreDataSource @Inject constructor(
         try {
             val handle = uniffi.turbotransfer_core.startTransfer(
                 filePath = filePath,
+                fileName = fileName,
                 deviceId = deviceId,
                 transportPref = transportPref,
                 address = address?.ifBlank { null }
