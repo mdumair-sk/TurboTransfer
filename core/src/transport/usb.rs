@@ -148,6 +148,16 @@ impl UsbTransport {
 
         let active_serial = if let Some(dev) = target_device {
             let _ = Self::setup_adb_forward(&dev.serial, config.local_port, config.remote_port);
+            // Verify and trigger Android receiver if not yet listening
+            if !Self::is_receiver_listening(&dev.serial, config.remote_port) {
+                let _ = Self::trigger_android_receive(&dev.serial);
+                for _ in 0..10 {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    if Self::is_receiver_listening(&dev.serial, config.remote_port) {
+                        break;
+                    }
+                }
+            }
             Some(dev.serial)
         } else {
             None
@@ -318,6 +328,37 @@ impl UsbTransport {
 
     /// Resolves the most appropriate ADB binary path.
     pub fn get_adb_path() -> std::path::PathBuf {
+        // 1. Check C:\adb\adb.exe
+        let c_adb = std::path::PathBuf::from(r"C:\adb\adb.exe");
+        if c_adb.is_file() {
+            return c_adb;
+        }
+
+        // 2. Check ANDROID_HOME / ANDROID_SDK_ROOT
+        if let Ok(android_home) = std::env::var("ANDROID_HOME").or_else(|_| std::env::var("ANDROID_SDK_ROOT")) {
+            let pt_adb = std::path::PathBuf::from(android_home)
+                .join("platform-tools")
+                .join(if cfg!(windows) { "adb.exe" } else { "adb" });
+            if pt_adb.is_file() {
+                return pt_adb;
+            }
+        }
+
+        // 3. Check LOCALAPPDATA / WinGet platform-tools
+        if let Ok(local_appdata) = std::env::var("LOCALAPPDATA") {
+            let winget_adb = std::path::PathBuf::from(local_appdata)
+                .join("Microsoft")
+                .join("WinGet")
+                .join("Packages")
+                .join("Google.PlatformTools_Microsoft.Winget.Source_8wekyb3d8bbwe")
+                .join("platform-tools")
+                .join("adb.exe");
+            if winget_adb.is_file() {
+                return winget_adb;
+            }
+        }
+
+        // 4. Default to adb in PATH
         std::path::PathBuf::from("adb")
     }
 

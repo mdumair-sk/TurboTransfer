@@ -89,11 +89,19 @@ pub fn render_transfer_screen(f: &mut Frame, app: &AppState, area: Rect) {
         .label(gauge_title);
     f.render_widget(gauge, chunks[1]);
 
+    let is_failed = app.active_progress.as_ref().map(|p| p.status) == Some(TransferStatus::Failed);
+
     // Metrics & Transport Breakdown Block
     let metrics_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title(if is_completed { " Transfer Summary & Final Throughput " } else { " Multipath Throughput & Scheduler Metrics " });
+        .title(if is_completed {
+            " Transfer Summary & Final Throughput "
+        } else if is_failed {
+            " Transfer Failure Details "
+        } else {
+            " Multipath Throughput & Scheduler Metrics "
+        });
 
     let metrics_lines = if is_completed {
         vec![
@@ -119,6 +127,23 @@ pub fn render_transfer_screen(f: &mut Frame, app: &AppState, area: Rect) {
             Line::from(""),
             Line::from(vec![
                 Span::styled("   [Enter] Return to Receiver / Menu   │   [Esc] Main Menu   │   [D] View Details", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            ]),
+        ]
+    } else if is_failed {
+        let err_msg = app.status_message.as_deref().unwrap_or("Transfer interrupted or rejected by peer");
+        vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("   ✖ File transfer failed to complete", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("   Diagnostics: ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled(err_msg, Style::default().fg(Color::LightRed)),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("   [R] Retry / Resume   │   [Esc] Main Menu   │   [D] Diagnostics Details", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
             ]),
         ]
     } else {
