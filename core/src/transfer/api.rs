@@ -1062,25 +1062,39 @@ pub fn get_progress(transfer_id: Uuid) -> Option<TransferProgress> {
 pub fn get_devices() -> Vec<DeviceInfo> {
     let mut devices = Vec::new();
 
-    // 1. Enumerate connected ADB devices that are actively in Receive Mode
+    // 1. Enumerate connected ADB devices
     if let Ok(adb_devs) = UsbTransport::list_adb_devices() {
         for d in adb_devs {
             if d.state == "device" {
-                if UsbTransport::is_receiver_listening(&d.serial, 9876) {
-                    let name = if let Some(model) = &d.model {
-                        format!("Android Phone: {} ({})", model, d.serial)
-                    } else if let Some(prod) = &d.product {
-                        format!("Android Device: {} ({})", prod, d.serial)
-                    } else {
-                        format!("Android ADB Device ({})", d.serial)
-                    };
-                    devices.push(DeviceInfo {
-                        device_id: Uuid::from_u128(crate::checksum::compute_xxhash64(d.serial.as_bytes()) as u128),
-                        device_name: name,
-                        transport: "USB (Ready to Receive)".to_string(),
-                        is_connected: true,
-                    });
-                }
+                let _ = UsbTransport::setup_adb_forward(&d.serial, 9876, 9876);
+                let is_listening = if UsbTransport::is_receiver_listening(&d.serial, 9876) {
+                    true
+                } else {
+                    let _ = UsbTransport::trigger_android_receive(&d.serial);
+                    std::thread::sleep(std::time::Duration::from_millis(80));
+                    UsbTransport::is_receiver_listening(&d.serial, 9876)
+                };
+
+                let name = if let Some(model) = &d.model {
+                    format!("Android Phone: {} ({})", model, d.serial)
+                } else if let Some(prod) = &d.product {
+                    format!("Android Device: {} ({})", prod, d.serial)
+                } else {
+                    format!("Android ADB Device ({})", d.serial)
+                };
+
+                let transport_desc = if is_listening {
+                    "USB (Ready to Receive)".to_string()
+                } else {
+                    "USB (ADB Connected)".to_string()
+                };
+
+                devices.push(DeviceInfo {
+                    device_id: Uuid::from_u128(crate::checksum::compute_xxhash64(d.serial.as_bytes()) as u128),
+                    device_name: name,
+                    transport: transport_desc,
+                    is_connected: true,
+                });
             }
         }
     }

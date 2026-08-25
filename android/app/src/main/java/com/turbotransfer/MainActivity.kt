@@ -81,6 +81,11 @@ class MainActivity : ComponentActivity() {
         val selectedTabFlow = kotlinx.coroutines.flow.MutableStateFlow<Int>(0)
         val activeSessionFlow = kotlinx.coroutines.flow.MutableStateFlow<ActiveTransferSessionState?>(null)
         val lastCompletedItemFlow = kotlinx.coroutines.flow.MutableStateFlow<TransferHistoryItem?>(null)
+        val isListeningFlow = kotlinx.coroutines.flow.MutableStateFlow<Boolean>(false)
+        val receiveStatusFlow = kotlinx.coroutines.flow.MutableStateFlow<String>("Idle")
+        val receiveDestDirFlow = kotlinx.coroutines.flow.MutableStateFlow<String>(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath
+        )
     }
 
     private lateinit var spikeManager: WifiDirectSpikeManager
@@ -126,12 +131,21 @@ class MainActivity : ComponentActivity() {
                     hotspotManager.stopHotspot()
                 }
                 "com.turbotransfer.ENTER_RECEIVE" -> {
+                    val dest = intent.getStringExtra("dest_dir") ?: receiveDestDirFlow.value
                     kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
                         try {
-                            enterReceiveMode(null, "/sdcard/Download")
+                            val statusMsg = enterReceiveMode(null, dest)
+                            isListeningFlow.value = true
+                            receiveStatusFlow.value = statusMsg
                             selectedTabFlow.value = 1 // Switch to Receive tab
                         } catch (e: Exception) {
-                            android.util.Log.e("TurboTransfer", "Failed to enter receive mode via broadcast", e)
+                            if (e.message?.contains("already active") == true) {
+                                isListeningFlow.value = true
+                                receiveStatusFlow.value = "Listening on 0.0.0.0:9876"
+                                selectedTabFlow.value = 1
+                            } else {
+                                android.util.Log.e("TurboTransfer", "Failed to enter receive mode via broadcast", e)
+                            }
                         }
                     }
                 }
@@ -267,8 +281,8 @@ fun TurboTransferApp(
     }
 
     var currentProgress by remember { mutableStateOf<FfiTransferProgress?>(null) }
-    var receiveStatus by remember { mutableStateOf("Idle") }
-    var isListening by remember { mutableStateOf(false) }
+    val receiveStatus by MainActivity.receiveStatusFlow.collectAsState()
+    val isListening by MainActivity.isListeningFlow.collectAsState()
 
     // Multi-File Transfer Queue
     val transferQueue = remember { mutableStateListOf<SelectedFileInfo>() }
@@ -365,6 +379,55 @@ fun TurboTransferApp(
         }
     }
 
+    // Background detector for incoming or external active transfers
+    LaunchedEffect(Unit) {
+        while (true) {
+            try {
+                if (MainActivity.activeTransferIdFlow.value == null) {
+                    val transfers = withContext(Dispatchers.IO) {
+                        try {
+                            getTransfers()
+                        } catch (e: Exception) {
+                            emptyList()
+                        }
+                    }
+                    val activeTransfer = transfers.firstOrNull {
+                        it.status == FfiTransferStatus.IN_PROGRESS && it.role == FfiTransferRole.RECEIVER
+                    } ?: transfers.firstOrNull {
+                        it.status == FfiTransferStatus.IN_PROGRESS
+                    }
+
+                    if (activeTransfer != null) {
+                        val saveDir = MainActivity.receiveDestDirFlow.value
+                        val resolvedPath = File(saveDir, activeTransfer.fileName).absolutePath
+                        val isOut = (activeTransfer.role == FfiTransferRole.SENDER)
+
+                        peakTotalSpeed = 0.0
+                        peakUsbSpeed = 0.0
+                        peakWifiSpeed = 0.0
+                        speedSum = 0.0
+                        speedSampleCount = 0
+
+                        MainActivity.activeSessionFlow.value = ActiveTransferSessionState(
+                            transferId = activeTransfer.transferId,
+                            fileName = activeTransfer.fileName,
+                            fileSize = activeTransfer.fileSize.toLong(),
+                            formattedSize = UriUtils.formatFileSize(activeTransfer.fileSize.toLong()),
+                            filePath = resolvedPath,
+                            isOutgoing = isOut,
+                            startTimeMs = System.currentTimeMillis()
+                        )
+                        MainActivity.activeTransferIdFlow.value = activeTransfer.transferId
+                        MainActivity.selectedTabFlow.value = 2 // Auto-switch to Transfer Dashboard!
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("TurboTransfer", "Transfer polling error", e)
+            }
+            delay(400)
+        }
+    }
+
     // Polling loop for active transfer progress
     LaunchedEffect(activeTransferId) {
         val transferId = activeTransferId ?: return@LaunchedEffect
@@ -396,14 +459,17 @@ fun TurboTransferApp(
                             val durationMs = activeSession?.let { System.currentTimeMillis() - it.startTimeMs } ?: 1000L
                             val avgSpeed = if (speedSampleCount > 0) speedSum / speedSampleCount else peakTotalSpeed
                             val session = activeSession
+                            val saveDir = MainActivity.receiveDestDirFlow.value
+                            val finalFilePath = session?.filePath?.ifBlank { File(saveDir, p.fileName).absolutePath } ?: File(saveDir, p.fileName).absolutePath
+                            val isOutgoing = session?.isOutgoing ?: false
 
                             val item = TransferHistoryItem(
                                 id = transferId,
                                 fileName = session?.fileName ?: p.fileName,
                                 fileSize = session?.fileSize ?: p.fileSize.toLong(),
                                 formattedSize = UriUtils.formatFileSize(session?.fileSize ?: p.fileSize.toLong()),
-                                filePath = session?.filePath ?: "",
-                                isOutgoing = session?.isOutgoing ?: true,
+                                filePath = finalFilePath,
+                                isOutgoing = isOutgoing,
                                 timestamp = System.currentTimeMillis(),
                                 formattedDate = "Just now",
                                 durationMs = durationMs,
@@ -428,7 +494,26 @@ fun TurboTransferApp(
                                 status = "Completed"
                             )
 
+                            // Index in Android MediaStore / Downloads
+                            if (!isOutgoing && finalFilePath.isNotBlank()) {
+                                try {
+                                    android.media.MediaScannerConnection.scanFile(
+                                        context,
+                                        arrayOf(finalFilePath),
+                                        null
+                                    ) { path, uri ->
+                                        android.util.Log.i("TurboTransfer", "Media scanned: $path -> $uri")
+                                    }
+                                } catch (e: Exception) {
+                                    android.util.Log.w("TurboTransfer", "Media scan failed", e)
+                                }
+                            }
+
                             MainActivity.lastCompletedItemFlow.value = item
+                            withContext(Dispatchers.Main) {
+                                val verb = if (isOutgoing) "Sent" else "Received"
+                                Toast.makeText(context, "$verb ${item.fileName} successfully!", Toast.LENGTH_SHORT).show()
+                            }
 
                             // Advance queue if multi-file transfer is active
                             if (isQueueRunning) {
@@ -443,12 +528,16 @@ fun TurboTransferApp(
                             break
                         } else if (p.status == FfiTransferStatus.FAILED || p.status == FfiTransferStatus.CANCELLED) {
                             val session = activeSession
+                            val saveDir = MainActivity.receiveDestDirFlow.value
+                            val finalFilePath = session?.filePath?.ifBlank { File(saveDir, p.fileName).absolutePath } ?: File(saveDir, p.fileName).absolutePath
+                            val isOutgoing = session?.isOutgoing ?: false
+
                             TransferHistoryManager.addTransferRecord(
                                 id = transferId,
                                 fileName = session?.fileName ?: p.fileName,
                                 fileSize = session?.fileSize ?: p.fileSize.toLong(),
-                                filePath = session?.filePath ?: "",
-                                isOutgoing = session?.isOutgoing ?: true,
+                                filePath = finalFilePath,
+                                isOutgoing = isOutgoing,
                                 durationMs = 0L,
                                 avgSpeedMBps = 0.0,
                                 peakSpeedMBps = 0.0,
@@ -621,25 +710,33 @@ fun TurboTransferApp(
                             try {
                                 if (!isListening) {
                                     TransferLockManager.acquireLocks(context)
-                                    val statusMsg = enterReceiveMode(
-                                        address = address.ifBlank { null },
-                                        destDir = destDir
-                                    )
+                                    val statusMsg = try {
+                                        enterReceiveMode(
+                                            address = address.ifBlank { null },
+                                            destDir = destDir
+                                        )
+                                    } catch (e: Exception) {
+                                        if (e.message?.contains("already active") == true) {
+                                            "Listening on ${address.ifBlank { "0.0.0.0:9876" }}"
+                                        } else {
+                                            throw e
+                                        }
+                                    }
                                     withContext(Dispatchers.Main) {
-                                        receiveStatus = statusMsg
-                                        isListening = true
+                                        MainActivity.receiveStatusFlow.value = statusMsg
+                                        MainActivity.isListeningFlow.value = true
                                     }
                                 } else {
                                     stopReceiveMode()
                                     TransferLockManager.releaseLocks()
                                     withContext(Dispatchers.Main) {
-                                        receiveStatus = "Receive listener stopped"
-                                        isListening = false
+                                        MainActivity.receiveStatusFlow.value = "Receive listener stopped"
+                                        MainActivity.isListeningFlow.value = false
                                     }
                                 }
                             } catch (e: Exception) {
                                 withContext(Dispatchers.Main) {
-                                    receiveStatus = "Error: ${e.message}"
+                                    MainActivity.receiveStatusFlow.value = "Error: ${e.message}"
                                 }
                             }
                         }
@@ -1371,18 +1468,68 @@ fun ReceiveScreen(
     hotspotState: WifiHotspotState,
     onToggleReceive: (destDir: String, address: String) -> Unit
 ) {
-    var destDir by remember { mutableStateOf("/sdcard/Download") }
+    val destDirFromFlow by MainActivity.receiveDestDirFlow.collectAsState()
     var address by remember { mutableStateOf("0.0.0.0:9876") }
+    var showQrDialog by remember { mutableStateOf(false) }
+    var usbAvailable by remember { mutableStateOf(false) }
+    var detectedIps by remember { mutableStateOf<List<String>>(emptyList()) }
     val context = LocalContext.current
+
+    val activeSession by MainActivity.activeSessionFlow.collectAsState()
+    val activeTransferId by MainActivity.activeTransferIdFlow.collectAsState()
 
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         uri?.let {
             val docId = android.provider.DocumentsContract.getTreeDocumentId(it)
-            if (docId.startsWith("primary:")) {
-                destDir = "/sdcard/" + docId.substringAfter("primary:")
+            val path = if (docId.startsWith("primary:")) {
+                "/sdcard/" + docId.substringAfter("primary:")
             } else {
-                destDir = "/sdcard/Download"
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath
             }
+            MainActivity.receiveDestDirFlow.value = path
+        }
+    }
+
+    // Network & USB Probe
+    LaunchedEffect(Unit) {
+        while (true) {
+            val (usbOk, ips) = withContext(Dispatchers.IO) {
+                var usb = false
+                try {
+                    java.net.Socket().use { socket ->
+                        socket.connect(java.net.InetSocketAddress("127.0.0.1", 9876), 150)
+                        usb = true
+                    }
+                } catch (_: Exception) {}
+
+                val foundIps = mutableListOf<String>()
+                try {
+                    val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+                    while (interfaces.hasMoreElements()) {
+                        val iface = interfaces.nextElement()
+                        if (iface.isLoopback || !iface.isUp) continue
+                        val addresses = iface.inetAddresses
+                        while (addresses.hasMoreElements()) {
+                            val addr = addresses.nextElement()
+                            if (addr is java.net.Inet4Address && !addr.isLoopbackAddress) {
+                                val host = addr.hostAddress
+                                if (!host.isNullOrBlank() && !foundIps.contains(host)) {
+                                    foundIps.add(host)
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                Pair(usb, foundIps)
+            }
+            usbAvailable = usbOk
+            if (usbOk && !MainActivity.isListeningFlow.value) {
+                MainActivity.isListeningFlow.value = true
+                MainActivity.receiveStatusFlow.value = "Listening on 0.0.0.0:9876"
+            }
+            detectedIps = ips
+            delay(1500)
         }
     }
 
@@ -1398,6 +1545,10 @@ fun ReceiveScreen(
         label = "pulseScale"
     )
 
+    val isDualChannelReady = usbAvailable && (hotspotState.isActive || detectedIps.isNotEmpty())
+    val usbLabel = UsbHardwareHelper.getUsbSpeedLabel(context)
+    val primaryIp = if (hotspotState.isActive) "192.168.43.1" else detectedIps.firstOrNull() ?: "127.0.0.1"
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -1407,11 +1558,22 @@ fun ReceiveScreen(
         contentPadding = PaddingValues(vertical = 16.dp)
     ) {
         item {
-            Text(
-                "Receive Files",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Receive Files",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                if (hotspotState.isActive && hotspotState.hotspotInfo != null) {
+                    IconButton(onClick = { showQrDialog = true }) {
+                        Icon(Icons.Default.QrCode, contentDescription = "Show Hotspot QR", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
         }
 
         // 1. Animated Radar Graphic Hub
@@ -1419,7 +1581,7 @@ fun ReceiveScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(200.dp),
+                    .height(180.dp),
                 contentAlignment = Alignment.Center
             ) {
                 if (isListening) {
@@ -1454,7 +1616,7 @@ fun ReceiveScreen(
             }
         }
 
-        // 2. Status Badge & Details Card
+        // 2. Dual-Channel Readiness Badge & Status Card
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1468,22 +1630,67 @@ fun ReceiveScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = if (isListening) "● Ready to Receive" else "○ Receiver Inactive",
-                            fontWeight = FontWeight.Bold,
-                            color = if (isListening) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text("Port: 9876", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .background(if (isListening) Color(0xFF4CAF50) else Color.Gray, CircleShape)
+                            )
+                            Text(
+                                text = if (isListening) "Ready to Receive" else "Receiver Inactive",
+                                fontWeight = FontWeight.Bold,
+                                color = if (isListening) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text("Port 9876", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+
+                    // Multi-Channel Badge
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = when {
+                            isDualChannelReady -> Color(0xFF1B5E20)
+                            hotspotState.isActive || detectedIps.isNotEmpty() -> Color(0xFF0D47A1)
+                            usbAvailable -> Color(0xFFE65100)
+                            else -> MaterialTheme.colorScheme.surface
+                        },
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isDualChannelReady) Icons.Default.Bolt else Icons.Default.Sensors,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = when {
+                                    isDualChannelReady -> "⚡ Dual-Channel Multipath Ready ($usbLabel + 5 GHz Wi-Fi)"
+                                    hotspotState.isActive -> "📡 5 GHz Local Hotspot Active"
+                                    detectedIps.isNotEmpty() -> "📡 Wi-Fi Direct / LAN Ready"
+                                    usbAvailable -> "🔌 $usbLabel (ADB Tunnel) Ready"
+                                    else -> "Waiting for USB or Wi-Fi link..."
+                                },
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+
                     Text(
-                        text = if (isListening) "Listening on $address for incoming USB & Wi-Fi transfers." else "Tap 'Start Receive Mode' below to begin accepting files.",
+                        text = if (isListening) "Listening on 0.0.0.0:9876. Senders can transmit over USB, 5 GHz Wi-Fi, or both simultaneously." else "Tap 'Start Receive Mode' below to accept incoming files.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1491,7 +1698,138 @@ fun ReceiveScreen(
             }
         }
 
-        // 3. Storage Destination Folder Card
+        // 3. 5 GHz Hotspot Card with Direct Toggle & QR Button
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Icon(
+                                Icons.Default.WifiTethering,
+                                contentDescription = null,
+                                tint = if (hotspotState.isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Column {
+                                Text("5 GHz Wi-Fi Hotspot", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                Text(
+                                    if (hotspotState.isActive) "Active (${hotspotState.hotspotInfo?.band ?: "5 GHz"})" else "Disabled",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (hotspotState.isActive) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = hotspotState.isActive,
+                            onCheckedChange = { enable ->
+                                if (enable) {
+                                    hotspotManager.startHotspot { success, msg ->
+                                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    hotspotManager.stopHotspot()
+                                }
+                            }
+                        )
+                    }
+
+                    if (hotspotState.isActive && hotspotState.hotspotInfo != null) {
+                        val info = hotspotState.hotspotInfo!!
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text("SSID: ${info.ssid}", fontFamily = FontFamily.Monospace, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Pass: ${info.passphrase}", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            OutlinedButton(
+                                onClick = { showQrDialog = true },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("QR Code", fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Quick PC CLI Helper & IP Address Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Send from PC Command", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        val pcCmd = if (primaryIp.isNotBlank() && primaryIp != "127.0.0.1") {
+                            "turbo send <file> --address 127.0.0.1:9876,$primaryIp:9876"
+                        } else {
+                            "turbo send <file>"
+                        }
+                        IconButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                val clip = ClipData.newPlainText("TurboTransfer CLI", pcCmd)
+                                clipboard.setPrimaryClip(clip)
+                                Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy command", modifier = Modifier.size(16.dp))
+                        }
+                    }
+
+                    Text(
+                        text = if (primaryIp.isNotBlank() && primaryIp != "127.0.0.1") {
+                            "turbo send <file> --address 127.0.0.1:9876,$primaryIp:9876"
+                        } else {
+                            "turbo send <file>"
+                        },
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
+                            .padding(8.dp)
+                            .fillMaxWidth()
+                    )
+                }
+            }
+        }
+
+        // 5. Storage Destination Folder Card
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1509,10 +1847,12 @@ fun ReceiveScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Save Location", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                         Text(
-                            destDir,
+                            destDirFromFlow,
                             style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                     OutlinedButton(
@@ -1525,10 +1865,49 @@ fun ReceiveScreen(
             }
         }
 
-        // 4. Primary Action Button
+        // 6. Active Transfer Preview (if transfer is running)
+        if (activeTransferId != null && activeSession?.isOutgoing == false) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1B382B)),
+                    border = BorderStroke(1.dp, Color(0xFF4CAF50))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("📥 Receiving File...", fontWeight = FontWeight.Bold, color = Color(0xFF81C784), fontSize = 13.sp)
+                            Text(
+                                activeSession?.fileName ?: "Incoming File",
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Button(
+                            onClick = { MainActivity.selectedTabFlow.value = 2 },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("View Monitor", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 7. Primary Action Button
         item {
             Button(
-                onClick = { onToggleReceive(destDir, address) },
+                onClick = { onToggleReceive(destDirFromFlow, address) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(54.dp),
@@ -1550,6 +1929,28 @@ fun ReceiveScreen(
                 )
             }
         }
+    }
+
+    if (showQrDialog && hotspotState.hotspotInfo != null) {
+        val info = hotspotState.hotspotInfo!!
+        AlertDialog(
+            onDismissRequest = { showQrDialog = false },
+            title = { Text("5 GHz Hotspot Pairing") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("SSID: ${info.ssid}", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    Text("Password: ${info.passphrase}", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    Text("Band: ${info.band}", fontFamily = FontFamily.Monospace)
+                    Text("Port: 9876", fontFamily = FontFamily.Monospace)
+                    Text("Connect your PC or sending phone to this Wi-Fi network.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showQrDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
     }
 }
 

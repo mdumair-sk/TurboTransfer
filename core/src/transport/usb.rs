@@ -498,10 +498,11 @@ impl UsbTransport {
     }
 
     /// Probes if the target ADB device is actively running a TurboTransfer receiver on the specified port.
-    pub fn is_receiver_listening(_serial: &str, port: u16) -> bool {
+    pub fn is_receiver_listening(serial: &str, port: u16) -> bool {
+        let _ = Self::setup_adb_forward(serial, port, port);
         std::net::TcpStream::connect_timeout(
             &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
-            Duration::from_millis(20),
+            Duration::from_millis(150),
         ).is_ok()
     }
 

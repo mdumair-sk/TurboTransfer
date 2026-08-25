@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+
+  <!-- Rounded Yellow Background -->
+  <rect
+    width="512"
+    height="512"
+    rx="115"
+    fill="#FFEB3B"
+  />
+
+  <!-- Subtle inner background highlight -->
+  <rect
+    x="8"
+    y="8"
+    width="496"
+    height="496"
+    rx="108"
+    fill="none"
+    stroke="#FFF176"
+    stroke-width="8"
+    opacity="0.45"
+  />
+
+  <!-- Central Black Circle -->
+  <circle
+    cx="256"
+    cy="256"
+    r="164"
+    fill="#151515"
+  />
+
+  <!-- Subtle circle depth -->
+  <circle
+    cx="256"
+    cy="256"
+    r="164"
+    fill="none"
+    stroke="#2A2A2A"
+    stroke-width="6"
+  />
+
+  <!-- Lightning Bolt Shadow -->
+  <path
+    d="
+      M 292 88
+      L 184 258
+      L 238 258
+      L 214 428
+      L 330 208
+      L 274 208
+      Z
+    "
+    fill="#000000"
+    opacity="0.18"
+    transform="translate(5 7)"
+  />
+
+  <!-- Lightning Bolt -->
+  <path
+    d="
+      M 292 88
+      L 184 258
+      L 238 258
+      L 214 428
+      L 330 208
+      L 274 208
+      Z
+    "
+    fill="#FF3B30"
+  />
+
+  <!-- Subtle Bolt Highlight -->
+  <path
+    d="
+      M 289 101
+      L 201 249
+      L 249 249
+      L 232 383
+      L 314 220
+      L 268 220
+      Z
+    "
+    fill="#FF5A52"
+    opacity="0.35"
+  />
+
+</svg>
