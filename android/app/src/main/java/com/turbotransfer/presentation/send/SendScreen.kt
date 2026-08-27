@@ -314,6 +314,12 @@ fun SendScreen(
         }
 
         val discoveredReceiver = uiState.discoveredReceiver
+        val effectiveAddress = if (uiState.showCustomAddressField && uiState.customAddress.isNotBlank()) {
+            uiState.customAddress
+        } else {
+            discoveredReceiver?.address ?: uiState.customAddress.ifBlank { "127.0.0.1:9876" }
+        }
+
         item {
             if (discoveredReceiver != null) {
                 Card(
@@ -382,7 +388,7 @@ fun SendScreen(
 
                         Button(
                             onClick = {
-                                viewModel.startBatchTransfer(discoveredReceiver.address) {
+                                viewModel.startBatchTransfer(effectiveAddress) {
                                     onNavigateToTransfer()
                                 }
                             },
@@ -419,26 +425,54 @@ fun SendScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(20.dp),
+                            .padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(36.dp),
-                            strokeWidth = 3.dp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.5.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                "Scanning for PC Receiver...",
+                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
                         Text(
-                            "Scanning for PC Receiver...",
-                            fontWeight = FontWeight.SemiBold,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            "Connect USB cable or run receive mode on PC in the same Wi-Fi hotspot",
+                            "Connect USB cable or run receive mode on PC in the same Wi-Fi network",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center
                         )
+
+                        if (uiState.transferQueue.isNotEmpty()) {
+                            Button(
+                                onClick = {
+                                    viewModel.startBatchTransfer(effectiveAddress) {
+                                        onNavigateToTransfer()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                val totalBytes = uiState.transferQueue.sumOf { it.sizeBytes }
+                                Text(
+                                    "Send Now (${UriUtils.formatFileSize(totalBytes)})",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
                     }
                 }
             }

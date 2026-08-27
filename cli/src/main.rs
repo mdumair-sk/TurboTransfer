@@ -145,18 +145,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 addr,
                 dest.display()
             );
+            let mut receive_task = enter_receive_mode(Some(addr.clone()), dest.clone()).await?;
+            let mut seen_completed = std::collections::HashSet::new();
+            let mut seen_started = std::collections::HashSet::new();
+            let mut monitor_interval = tokio::time::interval(tokio::time::Duration::from_millis(200));
+
             loop {
-                let receive_task = enter_receive_mode(Some(addr.clone()), dest.clone()).await?;
-                match receive_task.await {
-                    Ok(Ok(output_path)) => {
-                        println!("\nSuccessfully received file: {}", output_path.display());
+                tokio::select! {
+                    _ = monitor_interval.tick() => {
+                        let active_transfers = get_transfers();
+                        for t in active_transfers {
+                            if t.role == turbotransfer_core::manifest::TransferRole::Receiver {
+                                if seen_started.insert(t.transfer_id) {
+                                    println!("\n[Incoming Transfer] Receiving '{}' ({} bytes, ID: {})", t.file_name, t.file_size, t.transfer_id);
+                                }
+                                if let Some(p) = get_progress(t.transfer_id) {
+                                    let mb_s = (p.aggregate_throughput_bps as f64) / (1024.0 * 1024.0);
+                                    print!(
+                                        "\r[{}] {:.1}% ({}/{} bytes) | {:.2} MB/s | Status: {:?}",
+                                        t.file_name, p.percent, p.bytes_transferred, p.file_size, mb_s, p.status
+                                    );
+                                    let _ = std::io::Write::flush(&mut std::io::stdout());
+
+                                    if p.status == turbotransfer_core::manifest::TransferStatus::Completed && seen_completed.insert(t.transfer_id) {
+                                        println!("\n[Incoming Transfer] Finished '{}' -> saved to destination directory!", t.file_name);
+                                    } else if p.status == turbotransfer_core::manifest::TransferStatus::Failed && seen_completed.insert(t.transfer_id) {
+                                        println!("\n[Incoming Transfer] Failed '{}'!", t.file_name);
+                                    }
+                                }
+                            }
+                        }
                     }
-                    Ok(Err(e)) => {
-                        eprintln!("\nReceive session error: {}", e);
-                    }
-                    Err(e) => {
-                        eprintln!("\nReceive task error: {}", e);
-                        break;
+                    res = &mut receive_task => {
+                        match res {
+                            Ok(Ok(output_path)) => {
+                                println!("\nSuccessfully received file: {}", output_path.display());
+                            }
+                            Ok(Err(e)) => {
+                                eprintln!("\nReceive session error: {}", e);
+                            }
+                            Err(e) => {
+                                eprintln!("\nReceive task error: {}", e);
+                                break;
+                            }
+                        }
                     }
                 }
             }

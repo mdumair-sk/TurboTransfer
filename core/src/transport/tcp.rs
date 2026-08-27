@@ -6,7 +6,7 @@ use tokio::io::{AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 
 use super::{Transport, TransportError, TransportKind, TransportStatus};
-use crate::protocol::{encode_frame, FrameReader, Message};
+use crate::protocol::{encode_frame_parts, FrameReader, Message};
 
 /// Concrete TCP implementation of the `Transport` trait using OS sockets (§8, §9).
 pub struct TcpTransport {
@@ -92,10 +92,10 @@ impl Transport for TcpTransport {
             ));
         }
 
-        let frame = encode_frame(msg)?;
-        let frame_len = frame.len() as u64;
+        let (header, maybe_payload) = encode_frame_parts(msg)?;
+        let mut frame_len = header.len() as u64;
 
-        if let Err(e) = self.writer.write_all(&frame).await {
+        if let Err(e) = self.writer.write_all(&header).await {
             self.status = TransportStatus::Disconnected;
             return Err(TransportError::Disconnected(format!(
                 "Socket write error: {}",
@@ -103,12 +103,27 @@ impl Transport for TcpTransport {
             )));
         }
 
-        if let Err(e) = self.writer.flush().await {
-            self.status = TransportStatus::Disconnected;
-            return Err(TransportError::Disconnected(format!(
-                "Socket flush error: {}",
-                e
-            )));
+        if let Some(payload) = maybe_payload {
+            frame_len += payload.len() as u64;
+            if let Err(e) = self.writer.write_all(payload).await {
+                self.status = TransportStatus::Disconnected;
+                return Err(TransportError::Disconnected(format!(
+                    "Socket write error: {}",
+                    e
+                )));
+            }
+        }
+
+        // Flush control messages immediately to guarantee low handshake/ACK latency,
+        // but stream continuous ChunkData without synchronous flush to maximize TCP throughput.
+        if !matches!(msg, Message::ChunkData(_)) {
+            if let Err(e) = self.writer.flush().await {
+                self.status = TransportStatus::Disconnected;
+                return Err(TransportError::Disconnected(format!(
+                    "Socket flush error: {}",
+                    e
+                )));
+            }
         }
 
         self.bytes_sent.fetch_add(frame_len, Ordering::Relaxed);

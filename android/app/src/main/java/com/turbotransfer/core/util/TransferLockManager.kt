@@ -12,8 +12,14 @@ class TransferLockManager(private val context: Context) {
     private var wifiLock: WifiManager.WifiLock? = null
     private var wakeLock: PowerManager.WakeLock? = null
 
+    private var lockRefCount = 0
+
     @Synchronized
     fun acquireLocks() {
+        lockRefCount++
+        if (lockRefCount > 1) {
+            return
+        }
         try {
             val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
             val powerManager = context.applicationContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
@@ -45,6 +51,12 @@ class TransferLockManager(private val context: Context) {
 
     @Synchronized
     fun releaseLocks() {
+        if (lockRefCount > 0) {
+            lockRefCount--
+        }
+        if (lockRefCount > 0) {
+            return
+        }
         try {
             if (wifiLock?.isHeld == true) {
                 wifiLock?.release()

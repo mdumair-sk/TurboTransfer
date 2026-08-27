@@ -59,6 +59,17 @@ async fn test_tcp_file_transfer_loopback() {
     }
     assert!(completed, "Transfer must reach Completed status");
 
+    // Verify throughput is frozen after completion and does not decay over time
+    let p_initial = get_progress(handle.transfer_id).expect("Progress must exist");
+    assert!(p_initial.aggregate_throughput_bps > 0.0);
+    sleep(Duration::from_millis(300)).await;
+    let p_later = get_progress(handle.transfer_id).expect("Progress must exist");
+    assert_eq!(
+        p_initial.aggregate_throughput_bps,
+        p_later.aggregate_throughput_bps,
+        "Completed throughput must remain frozen and not decay over time"
+    );
+
     // 4. Verify received file matches source name and byte content
     let output_path = dest_dir.join("test_direct_tcp.bin");
     assert!(output_path.exists(), "Received output file must exist on disk");

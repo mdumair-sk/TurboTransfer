@@ -11,7 +11,7 @@ use tokio::net::TcpStream;
 use uuid::Uuid;
 
 use super::{Transport, TransportError, TransportKind, TransportStatus};
-use crate::protocol::{encode_frame, FrameReader, HelloData, Message};
+use crate::protocol::{encode_frame, encode_frame_parts, FrameReader, HelloData, Message};
 
 /// Default reconnect poll interval (2s per TRD §8).
 pub const DEFAULT_USB_RECONNECT_INTERVAL: Duration = Duration::from_secs(2);
@@ -654,16 +654,28 @@ impl Transport for UsbTransport {
             TransportError::Disconnected("USB transport writer is unavailable".into())
         })?;
 
-        let frame = encode_frame(msg)?;
-        let frame_len = frame.len() as u64;
+        let (header, maybe_payload) = encode_frame_parts(msg)?;
+        let mut frame_len = header.len() as u64;
 
-        if let Err(e) = writer.write_all(&frame).await {
+        if let Err(e) = writer.write_all(&header).await {
             self.status = TransportStatus::Disconnected;
             error!("USB socket write error -> marked Disconnected: {}", e);
             return Err(TransportError::Disconnected(format!(
                 "USB socket write failed: {}",
                 e
             )));
+        }
+
+        if let Some(payload) = maybe_payload {
+            frame_len += payload.len() as u64;
+            if let Err(e) = writer.write_all(payload).await {
+                self.status = TransportStatus::Disconnected;
+                error!("USB socket write error -> marked Disconnected: {}", e);
+                return Err(TransportError::Disconnected(format!(
+                    "USB socket write failed: {}",
+                    e
+                )));
+            }
         }
 
         if let Err(e) = writer.flush().await {

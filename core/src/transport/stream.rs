@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 
 use super::{Transport, TransportError, TransportKind, TransportStatus};
-use crate::protocol::{encode_frame, FrameReader, Message};
+use crate::protocol::{encode_frame_parts, FrameReader, Message};
 
 /// Adapter that turns any bidirectional asynchronous byte stream into a `Transport` implementation.
 pub struct StreamTransport<S> {
@@ -62,15 +62,26 @@ where
             ));
         }
 
-        let frame = encode_frame(msg)?;
-        let frame_len = frame.len() as u64;
+        let (header, maybe_payload) = encode_frame_parts(msg)?;
+        let mut frame_len = header.len() as u64;
 
-        if let Err(e) = self.writer.write_all(&frame).await {
+        if let Err(e) = self.writer.write_all(&header).await {
             self.status = TransportStatus::Disconnected;
             return Err(TransportError::Disconnected(format!(
                 "Stream write error: {}",
                 e
             )));
+        }
+
+        if let Some(payload) = maybe_payload {
+            frame_len += payload.len() as u64;
+            if let Err(e) = self.writer.write_all(payload).await {
+                self.status = TransportStatus::Disconnected;
+                return Err(TransportError::Disconnected(format!(
+                    "Stream write error: {}",
+                    e
+                )));
+            }
         }
 
         if let Err(e) = self.writer.flush().await {

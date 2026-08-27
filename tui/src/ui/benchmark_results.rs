@@ -63,7 +63,7 @@ pub fn render_benchmark_results(f: &mut Frame, app: &AppState, area: Rect) {
             Span::styled("36.80 MB/s", Style::default().fg(Color::Magenta)),
         ]),
         Line::from(vec![
-            Span::styled("   USB 3.0 (ADB Tunnel)   : ", Style::default().fg(Color::Cyan)),
+            Span::styled("   USB (ADB Tunnel)   : ", Style::default().fg(Color::Cyan)),
             Span::styled("████████                                     ", Style::default().fg(Color::Cyan)),
             Span::styled("10.60 MB/s", Style::default().fg(Color::Cyan)),
         ]),

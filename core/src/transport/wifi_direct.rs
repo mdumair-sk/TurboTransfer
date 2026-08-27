@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 use log::{debug, error, info, warn};
 
 use super::{Transport, TransportError, TransportKind, TransportStatus};
-use crate::protocol::{encode_frame, FrameReader, Message};
+use crate::protocol::{encode_frame_parts, FrameReader, Message};
 
 /// Default heartbeat failure timeout (15s per TRD §9 & implementation prompt 7b).
 pub const DEFAULT_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -309,7 +309,7 @@ impl WifiDirectTransport {
     /// has joined the SSID, use the active default route instead of guessing a
     /// fixed 192.168.x.x gateway.
     #[cfg(target_os = "windows")]
-    fn resolve_windows_default_gateway() -> Result<String, TransportError> {
+    pub fn resolve_windows_default_gateway() -> Result<String, TransportError> {
         use std::process::Command;
 
         let output = Command::new("powershell.exe")
@@ -329,6 +329,11 @@ impl WifiDirectTransport {
             .find(|line| line.parse::<std::net::Ipv4Addr>().is_ok())
             .ok_or_else(|| TransportError::Other("No active IPv4 default gateway after hotspot association".into()))?;
         Ok(gateway.to_string())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    pub fn resolve_windows_default_gateway() -> Result<String, TransportError> {
+        Err(TransportError::Other("Not on windows".into()))
     }
 
     /// Generates the XML profile and triggers Windows WLAN association via `netsh`.
@@ -485,16 +490,28 @@ impl Transport for WifiDirectTransport {
             TransportError::Disconnected("Wi-Fi Direct writer is unavailable".into())
         })?;
 
-        let frame = encode_frame(msg)?;
-        let frame_len = frame.len() as u64;
+        let (header, maybe_payload) = encode_frame_parts(msg)?;
+        let mut frame_len = header.len() as u64;
 
-        if let Err(e) = writer.write_all(&frame).await {
+        if let Err(e) = writer.write_all(&header).await {
             self.status = TransportStatus::Disconnected;
             error!("Wi-Fi Direct socket write error -> marked Disconnected: {}", e);
             return Err(TransportError::Disconnected(format!(
                 "Wi-Fi Direct socket write failed: {}",
                 e
             )));
+        }
+
+        if let Some(payload) = maybe_payload {
+            frame_len += payload.len() as u64;
+            if let Err(e) = writer.write_all(payload).await {
+                self.status = TransportStatus::Disconnected;
+                error!("Wi-Fi Direct socket write error -> marked Disconnected: {}", e);
+                return Err(TransportError::Disconnected(format!(
+                    "Wi-Fi Direct socket write failed: {}",
+                    e
+                )));
+            }
         }
 
         if let Err(e) = writer.flush().await {

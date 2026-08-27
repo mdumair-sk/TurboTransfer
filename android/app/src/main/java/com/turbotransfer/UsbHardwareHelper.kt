@@ -11,7 +11,7 @@ object UsbHardwareHelper {
     /**
      * Determines the physical USB link speed/generation if connected.
      * Defaults accurately to USB 2.0 (High Speed, 480 Mbps) unless the kernel
-     * sysfs explicitly reports SuperSpeed (USB 3.0+).
+     * sysfs explicitly reports SuperSpeed (USB+).
      */
     fun getUsbSpeedLabel(context: Context): String {
         // 1. Check UDC current speed in sysfs (modern Android kernels)

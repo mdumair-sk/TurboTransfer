@@ -53,11 +53,24 @@ object UriUtils {
                 displayName = displayName.substringAfter("transfer_cache_")
             }
 
-            // 2. Resolve real physical filesystem path
+            // 2. Try direct physical filesystem path
             var realPath = getRealPathFromUri(context, uri)
+            var isDirectlyReadable = false
+
+            if (realPath != null) {
+                try {
+                    val f = File(realPath)
+                    if (f.exists() && f.isFile && f.canRead()) {
+                        java.io.FileInputStream(f).use { it.read() }
+                        isDirectlyReadable = true
+                    }
+                } catch (_: Exception) {
+                    isDirectlyReadable = false
+                }
+            }
 
             // 2.5 Common public storage direct path match by displayName and size
-            if (realPath == null && displayName != "Unknown") {
+            if (!isDirectlyReadable && displayName != "Unknown") {
                 val commonDirs = arrayOf(
                     Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
                     Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
@@ -69,33 +82,51 @@ object UriUtils {
                 )
                 for (dir in commonDirs) {
                     val candidate = File(dir, displayName)
-                    if (candidate.exists() && candidate.canRead() && (sizeBytes == 0L || candidate.length() == sizeBytes)) {
-                        realPath = candidate.absolutePath
-                        break
+                    if (candidate.exists() && candidate.isFile && candidate.canRead() && (sizeBytes == 0L || candidate.length() == sizeBytes)) {
+                        try {
+                            java.io.FileInputStream(candidate).use { it.read() }
+                            realPath = candidate.absolutePath
+                            isDirectlyReadable = true
+                            break
+                        } catch (_: Exception) {}
                     }
                 }
             }
 
-            // 3. Direct zero-copy streaming via Linux /proc/self/fd/<fd>
-            if (realPath == null || !File(realPath).exists() || !File(realPath).canRead()) {
+            // 3. Fallback: Stage content stream to application cache for unrestricted POSIX/Rust access
+            if (!isDirectlyReadable) {
                 try {
-                    val pfd = context.contentResolver.openFileDescriptor(uri, "r")
-                    if (pfd != null) {
-                        if (sizeBytes == 0L && pfd.statSize > 0L) {
-                            sizeBytes = pfd.statSize
+                    val stagingDir = File(context.cacheDir, "transfer_staging").apply { mkdirs() }
+                    val safeName = displayName.replace(Regex("[/\\\\:*?\"<>|]"), "_")
+                    val targetFile = File(stagingDir, safeName)
+
+                    // Re-use if already fully staged
+                    if (!targetFile.exists() || sizeBytes == 0L || targetFile.length() != sizeBytes) {
+                        context.contentResolver.openInputStream(uri)?.use { input ->
+                            FileOutputStream(targetFile).use { output ->
+                                val buffer = ByteArray(256 * 1024)
+                                var bytesRead: Int
+                                while (input.read(buffer).also { bytesRead = it } != -1) {
+                                    output.write(buffer, 0, bytesRead)
+                                }
+                                output.flush()
+                            }
                         }
-                        val fd = pfd.detachFd()
-                        realPath = "/proc/self/fd/$fd"
-                        Log.i(TAG, "Zero-copy streaming via $realPath for $displayName ($sizeBytes bytes)")
+                    }
+
+                    if (targetFile.exists() && targetFile.length() > 0L) {
+                        realPath = targetFile.absolutePath
+                        sizeBytes = targetFile.length()
+                        Log.i(TAG, "Staged content to cache for Rust engine: $realPath ($sizeBytes bytes)")
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to open ParcelFileDescriptor for $uri", e)
+                    Log.e(TAG, "Failed to stage content from $uri", e)
                 }
             } else {
-                if (sizeBytes == 0L) {
+                if (sizeBytes == 0L && realPath != null) {
                     sizeBytes = File(realPath).length()
                 }
-                if (displayName == "Unknown") {
+                if (displayName == "Unknown" && realPath != null) {
                     displayName = File(realPath).name
                 }
             }
@@ -103,7 +134,7 @@ object UriUtils {
             val ext = displayName.substringAfterLast('.', "")
             val category = FileCategory.fromExtension(ext)
 
-            return if (realPath != null) {
+            return if (realPath != null && File(realPath).exists()) {
                 SelectedFileInfo(
                     path = realPath,
                     displayName = displayName,

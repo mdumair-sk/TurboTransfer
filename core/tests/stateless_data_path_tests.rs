@@ -14,6 +14,7 @@ struct CorruptingStream<S> {
     inner: S,
     target_chunk_id: u32,
     corrupted_once: Arc<AtomicBool>,
+    corrupt_next_payload: Arc<AtomicBool>,
 }
 
 impl<S: AsyncWrite + Unpin> AsyncWrite for CorruptingStream<S> {
@@ -22,33 +23,26 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for CorruptingStream<S> {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, std::io::Error>> {
-        // If we detect a ChunkData frame (message_type 0x05) for target_chunk_id, corrupt a byte if not already done.
         let modified_buf;
-
-        let buf_to_write = if buf.len() > 10 && buf[4] == MSG_TYPE_CHUNK_DATA {
-            if !self.corrupted_once.load(Ordering::SeqCst) {
-                // Try decoding payload to check chunk_id
-                if let Ok(msg) = decode_frame(buf) {
-                    if let Message::ChunkData(mut chunk) = msg {
-                        if chunk.chunk_id == self.target_chunk_id {
-                            self.corrupted_once.store(true, Ordering::SeqCst);
-                            if let Some(b) = chunk.payload.first_mut() {
-                                *b = b.wrapping_add(1); // Corrupt byte!
-                            }
-                            modified_buf = encode_frame(&Message::ChunkData(chunk)).unwrap();
-                            &modified_buf[..]
-                        } else {
-                            buf
-                        }
-                    } else {
-                        buf
-                    }
-                } else {
-                    buf
-                }
-            } else {
-                buf
+        let buf_to_write = if self.corrupt_next_payload.load(Ordering::SeqCst) && !self.corrupted_once.load(Ordering::SeqCst) {
+            self.corrupted_once.store(true, Ordering::SeqCst);
+            self.corrupt_next_payload.store(false, Ordering::SeqCst);
+            let mut b_vec = buf.to_vec();
+            if let Some(b) = b_vec.first_mut() {
+                *b = b.wrapping_add(1);
             }
+            modified_buf = b_vec;
+            &modified_buf[..]
+        } else if buf.len() > 13 && buf[4] == MSG_TYPE_CHUNK_DATA {
+            let mut header_buf = buf[5..].to_vec();
+            let len_offset = header_buf.len() - 8;
+            header_buf[len_offset..].copy_from_slice(&0u64.to_le_bytes());
+            if let Ok(Message::ChunkData(chunk)) = Message::decode_payload(MSG_TYPE_CHUNK_DATA, &header_buf) {
+                if chunk.chunk_id == self.target_chunk_id && !self.corrupted_once.load(Ordering::SeqCst) {
+                    self.corrupt_next_payload.store(true, Ordering::SeqCst);
+                }
+            }
+            buf
         } else {
             buf
         };
@@ -146,11 +140,13 @@ async fn test_chunk_corruption_nack_and_retry() {
 
     let (client_stream, server_stream) = duplex(64 * 1024);
     let corrupted_once = Arc::new(AtomicBool::new(false));
+    let corrupt_next_payload = Arc::new(AtomicBool::new(false));
 
     let sender_stream = CorruptingStream {
         inner: client_stream,
         target_chunk_id: 1, // Corrupt chunk 1 first time sent
         corrupted_once: corrupted_once.clone(),
+        corrupt_next_payload,
     };
 
     let sender_id = Uuid::new_v4();
@@ -258,14 +254,14 @@ async fn test_idempotent_duplicate_chunk() {
         });
         send_msg(&mut client_write, &chunk_msg).await.unwrap();
         let ack1 = reader.read_frame().await.unwrap().unwrap();
-        assert!(matches!(ack1, Message::ChunkAck(a) if a.chunk_id == 0));
+        assert!(matches!(ack1, Message::ChunkAck(ref a) if a.chunk_id == 0) || matches!(ack1, Message::BatchChunkAck(ref b) if b.chunk_ids.contains(&0)));
 
         // 4. Send ChunkData #0 AGAIN (Duplicate delivery)
         send_msg(&mut client_write, &chunk_msg).await.unwrap();
         let ack2 = reader.read_frame().await.unwrap().unwrap();
         assert!(
-            matches!(ack2, Message::ChunkAck(a) if a.chunk_id == 0),
-            "Duplicate chunk must return ChunkAck"
+            matches!(ack2, Message::ChunkAck(ref a) if a.chunk_id == 0) || matches!(ack2, Message::BatchChunkAck(ref b) if b.chunk_ids.contains(&0)),
+            "Duplicate chunk must return ChunkAck or BatchChunkAck"
         );
 
         // 5. Complete

@@ -71,6 +71,17 @@ pub fn read_chunk_at<P: AsRef<Path>>(
     Ok(Bytes::from(buf))
 }
 
+/// Reads a chunk from an open file handle directly into a destination buffer slice at the given offset.
+pub fn read_chunk_into_slice(
+    file: &mut File,
+    offset: u64,
+    dest: &mut [u8],
+) -> Result<(), std::io::Error> {
+    file.seek(SeekFrom::Start(offset))?;
+    file.read_exact(dest)?;
+    Ok(())
+}
+
 /// Constructs a full `Chunk` struct from a `ChunkPlanEntry` and file on disk.
 pub fn create_chunk<P: AsRef<Path>>(
     transfer_id: Uuid,

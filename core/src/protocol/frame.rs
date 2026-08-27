@@ -2,70 +2,108 @@ use bytes::BytesMut;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use super::error::ProtocolError;
-use super::messages::Message;
+use super::messages::{Message, MSG_TYPE_CHUNK_DATA};
 
 /// Default maximum allowed frame length (256 MiB) to guard against excessive allocation.
 pub const DEFAULT_MAX_FRAME_SIZE: usize = 256 * 1024 * 1024;
 
-/// Encodes a `Message` into a binary frame:
+/// Encodes a `Message` into binary frame parts: `(header_bytes, optional_payload_slice)`.
+///
+/// For `Message::ChunkData`, this creates a small 69-byte header and borrows the chunk payload slice,
+/// completely avoiding the multi-megabyte `bincode` allocation and user-space `memcpy`.
+///
+/// For all other message types, `header_bytes` contains the complete frame and `None` is returned for payload.
+pub fn encode_frame_parts(msg: &Message) -> Result<(Vec<u8>, Option<&[u8]>), ProtocolError> {
+    match msg {
+        Message::ChunkData(d) => {
+            use super::messages::ChunkDataPayload;
+            let payload_len = d.payload.len();
+            let mut out = Vec::with_capacity(128);
+            out.extend_from_slice(&[0u8; 4]); // Placeholder for frame length prefix
+            out.push(MSG_TYPE_CHUNK_DATA);
+
+            let dummy = ChunkDataPayload {
+                transfer_id: d.transfer_id,
+                file_id: d.file_id,
+                chunk_id: d.chunk_id,
+                file_offset: d.file_offset,
+                payload_length: d.payload_length,
+                checksum: d.checksum,
+                payload: Vec::new(),
+            };
+            bincode::serialize_into(&mut out, &dummy)
+                .map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
+
+            let len_offset = out.len() - 8;
+            out[len_offset..len_offset + 8].copy_from_slice(&(payload_len as u64).to_le_bytes());
+
+            let frame_len = (out.len() - 4 + payload_len) as u32;
+            out[0..4].copy_from_slice(&frame_len.to_le_bytes());
+            Ok((out, Some(&d.payload)))
+        }
+        _ => {
+            let msg_type = msg.message_type();
+            let mut out = Vec::with_capacity(256);
+            out.extend_from_slice(&[0u8; 4]); // Placeholder for length prefix
+            out.push(msg_type);
+
+            match msg {
+                Message::Hello(d) => {
+                    bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
+                }
+                Message::TransferOffer(d) => {
+                    bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
+                }
+                Message::TransferAccept(d) => {
+                    bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
+                }
+                Message::TransferReject(d) => {
+                    bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
+                }
+                Message::ChunkData(_) => unreachable!(),
+                Message::ChunkAck(d) => {
+                    bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
+                }
+                Message::ChunkNack(d) => {
+                    bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
+                }
+                Message::Pause(d) => {
+                    bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
+                }
+                Message::Resume(d) => {
+                    bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
+                }
+                Message::Cancel(d) => {
+                    bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
+                }
+                Message::Complete(d) => {
+                    bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
+                }
+                Message::Heartbeat(d) => {
+                    bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
+                }
+                Message::BatchChunkAck(d) => {
+                    bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
+                }
+            }
+
+            let frame_len = (out.len() - 4) as u32;
+            out[0..4].copy_from_slice(&frame_len.to_le_bytes());
+            Ok((out, None))
+        }
+    }
+}
+
+/// Encodes a `Message` into a contiguous binary frame:
 /// `[4-byte LE message_length] [1-byte message_type] [N-byte bincode payload]`
 /// where `message_length = 1 + payload.len()`.
 pub fn encode_frame(msg: &Message) -> Result<Vec<u8>, ProtocolError> {
-    let msg_type = msg.message_type();
-    // Pre-allocate header + payload capacity to eliminate multiple re-allocations for large chunks
-    let capacity = match msg {
-        Message::ChunkData(d) => 4 + 1 + d.payload.len() + 128,
-        _ => 256,
-    };
-    let mut out = Vec::with_capacity(capacity);
-    out.extend_from_slice(&[0u8; 4]); // Placeholder for length prefix
-    out.push(msg_type);
-
-    match msg {
-        Message::Hello(d) => {
-            bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-        }
-        Message::TransferOffer(d) => {
-            bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-        }
-        Message::TransferAccept(d) => {
-            bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-        }
-        Message::TransferReject(d) => {
-            bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-        }
-        Message::ChunkData(d) => {
-            bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-        }
-        Message::ChunkAck(d) => {
-            bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-        }
-        Message::ChunkNack(d) => {
-            bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-        }
-        Message::Pause(d) => {
-            bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-        }
-        Message::Resume(d) => {
-            bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-        }
-        Message::Cancel(d) => {
-            bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-        }
-        Message::Complete(d) => {
-            bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-        }
-        Message::Heartbeat(d) => {
-            bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-        }
-        Message::BatchChunkAck(d) => {
-            bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-        }
+    let (mut header, maybe_payload) = encode_frame_parts(msg)?;
+    if let Some(payload) = maybe_payload {
+        header.reserve(payload.len());
+        header.extend_from_slice(payload);
     }
-
-    let frame_len = (out.len() - 4) as u32;
-    out[0..4].copy_from_slice(&frame_len.to_le_bytes());
-    Ok(out)
+    Ok(header)
 }
 
 /// Decodes a complete binary frame byte slice into a `Message`.

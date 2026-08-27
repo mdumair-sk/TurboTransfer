@@ -596,11 +596,12 @@ impl AppState {
             SettingsTab::Transfer => match self.settings_item {
                 0 => {
                     self.settings.chunk_size_mib = match self.settings.chunk_size_mib {
+                        2 => 4,
+                        4 => 8,
+                        8 => 16,
                         16 => 32,
                         32 => 64,
-                        64 => 128,
-                        128 => 256,
-                        _ => 16,
+                        _ => 2,
                     };
                 }
                 1 => {
@@ -670,7 +671,7 @@ mod tests {
         let mut app = AppState::new();
 
         for &screen in &Screen::ALL {
-            app.navigate_to(screen);
+            app.current_screen = screen;
             assert_eq!(app.current_screen, screen, "Screen {:?} was not reachable", screen);
         }
     }

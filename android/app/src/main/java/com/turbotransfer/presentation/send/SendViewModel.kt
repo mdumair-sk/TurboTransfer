@@ -4,10 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.turbotransfer.core.common.Resource
 import com.turbotransfer.domain.model.SelectedFileInfo
+import com.turbotransfer.domain.model.TransferStatus
 import com.turbotransfer.domain.usecase.discovery.ObserveReceiverDiscoveryUseCase
 import com.turbotransfer.domain.usecase.hotspot.ObserveHotspotStateUseCase
 import com.turbotransfer.domain.usecase.hotspot.StartHotspotUseCase
 import com.turbotransfer.domain.usecase.hotspot.StopHotspotUseCase
+import com.turbotransfer.domain.usecase.transfer.ObserveTransferProgressUseCase
 import com.turbotransfer.domain.usecase.transfer.StartTransferUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -20,7 +22,8 @@ class SendViewModel @Inject constructor(
     private val observeHotspotStateUseCase: ObserveHotspotStateUseCase,
     private val startHotspotUseCase: StartHotspotUseCase,
     private val stopHotspotUseCase: StopHotspotUseCase,
-    private val startTransferUseCase: StartTransferUseCase
+    private val startTransferUseCase: StartTransferUseCase,
+    private val observeTransferProgressUseCase: ObserveTransferProgressUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SendUiState())
@@ -111,33 +114,49 @@ class SendViewModel @Inject constructor(
         }
 
         _uiState.update { it.copy(isQueueRunning = true, currentQueueIndex = 0) }
-        processQueueItem(0, targetAddress, onTransferStarted)
+        processNextQueueItem(targetAddress, onTransferStarted)
     }
 
-    private fun processQueueItem(index: Int, targetAddress: String, onTransferStarted: () -> Unit) {
+    private fun processNextQueueItem(targetAddress: String, onTransferStarted: () -> Unit) {
         val queue = _uiState.value.transferQueue
-        if (index < queue.size) {
-            val item = queue[index]
+        if (queue.isNotEmpty()) {
+            val item = queue.first()
             viewModelScope.launch {
                 val res = startTransferUseCase(item.path, targetAddress, item.displayName)
                 when (res) {
                     is Resource.Success -> {
-                        _uiState.update { it.copy(currentQueueIndex = index) }
                         onTransferStarted()
+                        val transferId = res.data
+                        observeTransferProgressUseCase(transferId).collect { progress ->
+                            when (progress?.status) {
+                                TransferStatus.COMPLETED -> {
+                                    removeFileFromQueue(item)
+                                    if (_uiState.value.transferQueue.isNotEmpty()) {
+                                        processNextQueueItem(targetAddress, onTransferStarted)
+                                    } else {
+                                        _uiState.update { it.copy(isQueueRunning = false, currentQueueIndex = 0) }
+                                    }
+                                }
+                                TransferStatus.FAILED, TransferStatus.CANCELLED -> {
+                                    _uiState.update { it.copy(isQueueRunning = false) }
+                                }
+                                else -> {}
+                            }
+                        }
                     }
                     is Resource.Error -> {
-                        _uiState.update { it.copy(userMessage = "Error sending ${item.displayName}: ${res.message}") }
-                        if (index + 1 < queue.size) {
-                            processQueueItem(index + 1, targetAddress, onTransferStarted)
-                        } else {
-                            _uiState.update { it.copy(isQueueRunning = false) }
+                        _uiState.update {
+                            it.copy(
+                                userMessage = "Error sending ${item.displayName}: ${res.message}",
+                                isQueueRunning = false
+                            )
                         }
                     }
                     is Resource.Loading -> {}
                 }
             }
         } else {
-            _uiState.update { it.copy(isQueueRunning = false) }
+            _uiState.update { it.copy(isQueueRunning = false, currentQueueIndex = 0) }
         }
     }
 

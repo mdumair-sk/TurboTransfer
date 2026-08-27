@@ -117,11 +117,11 @@ pub fn render_transfer_screen(f: &mut Frame, app: &AppState, area: Rect) {
             ]),
             Line::from(""),
             Line::from(vec![
-                Span::styled("   ├─ USB Link Peak:   ", Style::default().fg(Color::White)),
+                Span::styled("   ├─ USB Link Throughput:    ", Style::default().fg(Color::White)),
                 Span::styled(format!("{:>6.2} MB/s", usb_mbps), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             ]),
             Line::from(vec![
-                Span::styled("   └─ 5 GHz Wi-Fi Peak:", Style::default().fg(Color::White)),
+                Span::styled("   └─ 5 GHz Wi-Fi Throughput: ", Style::default().fg(Color::White)),
                 Span::styled(format!("{:>6.2} MB/s", wifi_mbps), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
             ]),
             Line::from(""),

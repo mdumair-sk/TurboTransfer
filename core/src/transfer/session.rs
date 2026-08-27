@@ -55,13 +55,20 @@ pub async fn send_msg<W: AsyncWrite + Unpin>(
     Ok(())
 }
 
+/// Prepared chunk payload with pre-computed checksum, ready for immediate network transmission.
+struct PreparedChunk {
+    entry: crate::chunk::ChunkPlanEntry,
+    payload: Vec<u8>,
+    checksum: u64,
+}
+
 fn handle_ack_frame(
     frame: Message,
     is_usb: bool,
     in_flight: &mut std::collections::HashSet<u32>,
     completed_set: &mut std::collections::HashSet<u32>,
     plan_map: &std::collections::HashMap<u32, crate::chunk::ChunkPlanEntry>,
-    chunks_to_send: &mut std::collections::VecDeque<crate::chunk::ChunkPlanEntry>,
+    retry_tx: &std::sync::mpsc::Sender<crate::chunk::ChunkPlanEntry>,
     transfer_id: Uuid,
     bytes_sent_total: &mut u64,
     completed_chunks_count: &mut u32,
@@ -102,7 +109,7 @@ fn handle_ack_frame(
         Message::ChunkNack(nack) => {
             in_flight.remove(&nack.chunk_id);
             if let Some(entry) = plan_map.get(&nack.chunk_id) {
-                chunks_to_send.push_front(entry.clone());
+                let _ = retry_tx.send(entry.clone());
             }
         }
         other => {
@@ -194,6 +201,8 @@ where
     let mut completed_chunks_count = 0u32;
 
     let mut chunks_to_send = std::collections::VecDeque::new();
+    let mut completed_set: std::collections::HashSet<u32> = std::collections::HashSet::new();
+
     for entry in plan {
         let cid = entry.chunk_id;
         plan_map.insert(cid, entry.clone());
@@ -205,6 +214,7 @@ where
             if skip {
                 bytes_sent_total += entry.payload_length as u64;
                 completed_chunks_count += 1;
+                completed_set.insert(cid);
                 update_transfer_progress(transfer_id, bytes_sent_total, completed_chunks_count);
                 continue;
             }
@@ -213,81 +223,146 @@ where
     }
 
     let mut in_flight: std::collections::HashSet<u32> = std::collections::HashSet::new();
-    let mut completed_set: std::collections::HashSet<u32> = std::collections::HashSet::new();
-    let mut file_reader = std::fs::File::open(file_path)?;
-
+    let total_chunks_needed = plan_map.len();
     let is_usb = transport.kind() == crate::transport::TransportKind::Usb || transport.kind() == crate::transport::TransportKind::Tcp;
 
-    while !chunks_to_send.is_empty() {
-        match transfer_control_status(transfer_id) {
-            Some(TransferStatus::Paused) => return Err(TransferSessionError::Paused),
-            Some(TransferStatus::Cancelled) => return Err(TransferSessionError::Cancelled),
-            _ => {}
-        }
+    if completed_set.len() < total_chunks_needed {
+        let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel::<PreparedChunk>(8);
+        let (retry_tx, retry_rx) = std::sync::mpsc::channel::<crate::chunk::ChunkPlanEntry>();
+        let (recycle_tx, recycle_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        let is_cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-        if in_flight.len() < PIPELINE_DEPTH {
-            let next_entry = chunks_to_send.pop_front().unwrap();
-            let chunk_id = next_entry.chunk_id;
-            let file_offset = next_entry.file_offset;
-            let payload_len = next_entry.payload_length;
-            let file_id = manifest.file_id;
+        let reader_file_path = file_path.to_path_buf();
+        let reader_cancelled = std::sync::Arc::clone(&is_cancelled);
+        let chunk_size_bytes = manifest.chunk_size as usize;
+        let mut pending_reader_chunks = chunks_to_send;
 
-            use std::io::{Read, Seek, SeekFrom};
-            file_reader.seek(SeekFrom::Start(file_offset))?;
-            let mut payload = vec![0u8; payload_len as usize];
-            file_reader.read_exact(&mut payload)?;
-            let checksum = compute_xxhash64(&payload);
+        let reader_handle = tokio::task::spawn_blocking(move || -> Result<(), std::io::Error> {
+            let mut file = std::fs::File::open(&reader_file_path)?;
+            let mut buffer_pool: Vec<Vec<u8>> = Vec::with_capacity(16);
 
-            let chunk_msg = Message::ChunkData(ChunkDataPayload {
-                transfer_id,
-                file_id,
-                chunk_id,
-                file_offset,
-                payload_length: payload_len,
-                checksum,
-                payload,
-            });
+            loop {
+                if reader_cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
 
-            transport.send_frame(&chunk_msg).await?;
-            in_flight.insert(chunk_id);
+                while let Ok(buf) = recycle_rx.try_recv() {
+                    buffer_pool.push(buf);
+                }
 
-            // Opportunistically check if ACKs are waiting without blocking
-            tokio::select! {
-                biased;
-                frame_res = transport.receive_frame() => {
-                    if let Ok(Some(frame)) = frame_res {
-                        handle_ack_frame(
-                            frame,
-                            is_usb,
-                            &mut in_flight,
-                            &mut completed_set,
-                            &plan_map,
-                            &mut chunks_to_send,
-                            transfer_id,
-                            &mut bytes_sent_total,
-                            &mut completed_chunks_count,
-                        )?;
+                let next_entry = if let Ok(entry) = retry_rx.try_recv() {
+                    Some(entry)
+                } else if let Some(entry) = pending_reader_chunks.pop_front() {
+                    Some(entry)
+                } else {
+                    match retry_rx.recv_timeout(std::time::Duration::from_millis(50)) {
+                        Ok(entry) => Some(entry),
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    }
+                };
+
+                let entry = match next_entry {
+                    Some(e) => e,
+                    None => break,
+                };
+
+                let mut buf = buffer_pool.pop().unwrap_or_else(|| Vec::with_capacity(chunk_size_bytes));
+                buf.resize(entry.payload_length as usize, 0);
+
+                use std::io::Seek;
+                file.seek(std::io::SeekFrom::Start(entry.file_offset))?;
+                crate::chunk::read_chunk_into_slice(&mut file, entry.file_offset, &mut buf)?;
+
+                let checksum = compute_xxhash64(&buf);
+                if chunk_tx.blocking_send(PreparedChunk { entry, payload: buf, checksum }).is_err() {
+                    break;
+                }
+            }
+            Ok(())
+        });
+
+        while completed_set.len() < total_chunks_needed {
+            match transfer_control_status(transfer_id) {
+                Some(TransferStatus::Paused) => {
+                    is_cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return Err(TransferSessionError::Paused);
+                }
+                Some(TransferStatus::Cancelled) => {
+                    is_cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return Err(TransferSessionError::Cancelled);
+                }
+                _ => {}
+            }
+
+            if in_flight.len() < PIPELINE_DEPTH {
+                tokio::select! {
+                    biased;
+                    frame_res = transport.receive_frame() => {
+                        if let Ok(Some(frame)) = frame_res {
+                            handle_ack_frame(
+                                frame,
+                                is_usb,
+                                &mut in_flight,
+                                &mut completed_set,
+                                &plan_map,
+                                &retry_tx,
+                                transfer_id,
+                                &mut bytes_sent_total,
+                                &mut completed_chunks_count,
+                            )?;
+                        }
+                    }
+                    prepared_opt = chunk_rx.recv() => {
+                        if let Some(prepared) = prepared_opt {
+                            let chunk_id = prepared.entry.chunk_id;
+                            let file_offset = prepared.entry.file_offset;
+                            let payload_len = prepared.entry.payload_length;
+                            let file_id = manifest.file_id;
+                            let checksum = prepared.checksum;
+
+                            let chunk_msg = Message::ChunkData(ChunkDataPayload {
+                                transfer_id,
+                                file_id,
+                                chunk_id,
+                                file_offset,
+                                payload_length: payload_len,
+                                checksum,
+                                payload: prepared.payload,
+                            });
+
+                            transport.send_frame(&chunk_msg).await?;
+                            if let Message::ChunkData(d) = chunk_msg {
+                                let _ = recycle_tx.send(d.payload);
+                            }
+                            in_flight.insert(chunk_id);
+                        }
                     }
                 }
-                _ = async {} => {}
+            } else {
+                // Pipeline full -> await ACK from receiver to free slot
+                let frame = transport.receive_frame().await?.ok_or_else(|| {
+                    TransferSessionError::UnexpectedMessage("EOF while waiting for ChunkAck".into())
+                })?;
+                handle_ack_frame(
+                    frame,
+                    is_usb,
+                    &mut in_flight,
+                    &mut completed_set,
+                    &plan_map,
+                    &retry_tx,
+                    transfer_id,
+                    &mut bytes_sent_total,
+                    &mut completed_chunks_count,
+                )?;
             }
-        } else {
-            // Pipeline full -> await ACK from receiver to free slot
-            let frame = transport.receive_frame().await?.ok_or_else(|| {
-                TransferSessionError::UnexpectedMessage("EOF while waiting for ChunkAck".into())
-            })?;
-            handle_ack_frame(
-                frame,
-                is_usb,
-                &mut in_flight,
-                &mut completed_set,
-                &plan_map,
-                &mut chunks_to_send,
-                transfer_id,
-                &mut bytes_sent_total,
-                &mut completed_chunks_count,
-            )?;
         }
+
+        is_cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+        drop(retry_tx);
+        drop(chunk_rx);
+        drop(recycle_tx);
+        let _ = reader_handle.await;
     }
 
     // 6. Complete transfer
@@ -377,7 +452,7 @@ async fn handle_multipath_ack_frame(
     worker_in_flight: &mut std::collections::HashSet<u32>,
     completed: &std::sync::Arc<tokio::sync::Mutex<std::collections::HashSet<u32>>>,
     plan_map: &std::collections::HashMap<u32, crate::chunk::ChunkPlanEntry>,
-    pending: &std::sync::Arc<tokio::sync::Mutex<std::collections::VecDeque<crate::chunk::ChunkPlanEntry>>>,
+    retry_tx: &std::sync::mpsc::Sender<crate::chunk::ChunkPlanEntry>,
     transfer_id: Uuid,
     bytes_sent: &std::sync::Arc<std::sync::atomic::AtomicU64>,
     chunks_done: &std::sync::Arc<std::sync::atomic::AtomicU32>,
@@ -412,8 +487,7 @@ async fn handle_multipath_ack_frame(
         Message::ChunkNack(nack) => {
             worker_in_flight.remove(&nack.chunk_id);
             if let Some(entry) = plan_map.get(&nack.chunk_id) {
-                let mut p = pending.lock().await;
-                p.push_front(entry.clone());
+                let _ = retry_tx.send(entry.clone());
             }
         }
         _ => {}
@@ -555,23 +629,80 @@ pub async fn send_file_session_multipath(
         return Ok(());
     }
 
-    let shared_pending = std::sync::Arc::new(tokio::sync::Mutex::new(initial_chunks_to_send));
+    let (prepared_tx, prepared_rx) = tokio::sync::mpsc::channel::<PreparedChunk>(16);
+    let (retry_tx, retry_rx) = std::sync::mpsc::channel::<crate::chunk::ChunkPlanEntry>();
+    let (recycle_tx, recycle_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let is_cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    let reader_file_path = file_path.to_path_buf();
+    let reader_cancelled = std::sync::Arc::clone(&is_cancelled);
+    let chunk_size_bytes = manifest.chunk_size as usize;
+    let mut pending_reader_chunks = initial_chunks_to_send;
+
+    let reader_handle = tokio::task::spawn_blocking(move || -> Result<(), std::io::Error> {
+        let mut file = std::fs::File::open(&reader_file_path)?;
+        let mut buffer_pool: Vec<Vec<u8>> = Vec::with_capacity(32);
+
+        loop {
+            if reader_cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
+
+            while let Ok(buf) = recycle_rx.try_recv() {
+                buffer_pool.push(buf);
+            }
+
+            let next_entry = if let Ok(entry) = retry_rx.try_recv() {
+                Some(entry)
+            } else if let Some(entry) = pending_reader_chunks.pop_front() {
+                Some(entry)
+            } else {
+                match retry_rx.recv_timeout(std::time::Duration::from_millis(50)) {
+                    Ok(entry) => Some(entry),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            };
+
+            let entry = match next_entry {
+                Some(e) => e,
+                None => break,
+            };
+
+            let mut buf = buffer_pool.pop().unwrap_or_else(|| Vec::with_capacity(chunk_size_bytes));
+            buf.resize(entry.payload_length as usize, 0);
+
+            use std::io::Seek;
+            file.seek(std::io::SeekFrom::Start(entry.file_offset))?;
+            crate::chunk::read_chunk_into_slice(&mut file, entry.file_offset, &mut buf)?;
+
+            let checksum = compute_xxhash64(&buf);
+            if prepared_tx.blocking_send(PreparedChunk { entry, payload: buf, checksum }).is_err() {
+                break;
+            }
+        }
+        Ok(())
+    });
+
+    let shared_prepared_rx = std::sync::Arc::new(tokio::sync::Mutex::new(prepared_rx));
+    let shared_retry_tx = std::sync::Arc::new(retry_tx);
+    let shared_recycle_tx = std::sync::Arc::new(recycle_tx);
     let shared_completed = std::sync::Arc::new(tokio::sync::Mutex::new(completed_set_init));
     let shared_bytes_sent = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(bytes_sent_total_init));
     let shared_chunks_done = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(completed_chunks_count_init));
     let shared_plan_map = std::sync::Arc::new(plan_map);
-    let is_cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     let mut worker_handles = Vec::new();
 
     for (idx, mut transport) in transports.into_iter().enumerate() {
-        let pending = std::sync::Arc::clone(&shared_pending);
+        let prepared_rx = std::sync::Arc::clone(&shared_prepared_rx);
+        let retry_tx = std::sync::Arc::clone(&shared_retry_tx);
+        let recycle_tx = std::sync::Arc::clone(&shared_recycle_tx);
         let completed = std::sync::Arc::clone(&shared_completed);
         let bytes_sent = std::sync::Arc::clone(&shared_bytes_sent);
         let chunks_done = std::sync::Arc::clone(&shared_chunks_done);
         let plan_map = std::sync::Arc::clone(&shared_plan_map);
         let cancelled = std::sync::Arc::clone(&is_cancelled);
-        let file_path = file_path.to_path_buf();
         let file_id = manifest.file_id;
         let total_chunks = plan.len();
         let is_usb = transport.kind() == crate::transport::TransportKind::Usb || idx == 0;
@@ -579,10 +710,6 @@ pub async fn send_file_session_multipath(
         let handle = tokio::spawn(async move {
             const WORKER_PIPELINE_DEPTH: usize = 32;
             let mut worker_in_flight = std::collections::HashSet::new();
-            let mut file_reader = match std::fs::File::open(&file_path) {
-                Ok(f) => f,
-                Err(e) => return Err(TransferSessionError::Io(e)),
-            };
 
             loop {
                 if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
@@ -614,51 +741,38 @@ pub async fn send_file_session_multipath(
                 // Try to dispatch next chunk if worker has capacity
                 let can_dispatch = worker_in_flight.len() < WORKER_PIPELINE_DEPTH;
                 let next_chunk = if can_dispatch {
-                    let mut p = pending.lock().await;
-                    p.pop_front()
+                    let mut rx = prepared_rx.lock().await;
+                    rx.try_recv().ok()
                 } else {
                     None
                 };
 
-                if let Some(entry) = next_chunk {
-                    let chunk_id = entry.chunk_id;
-                    use std::io::{Read, Seek, SeekFrom};
-                    let payload = match (|| -> Result<Vec<u8>, std::io::Error> {
-                        file_reader.seek(SeekFrom::Start(entry.file_offset))?;
-                        let mut buf = vec![0u8; entry.payload_length as usize];
-                        file_reader.read_exact(&mut buf)?;
-                        Ok(buf)
-                    })() {
-                        Ok(data) => data,
-                        Err(e) => {
-                            // Re-queue chunk
-                            let mut p = pending.lock().await;
-                            p.push_front(entry);
-                            return Err(TransferSessionError::Io(e));
-                        }
-                    };
-                    let checksum = compute_xxhash64(&payload);
+                if let Some(prepared) = next_chunk {
+                    let chunk_id = prepared.entry.chunk_id;
                     let chunk_msg = Message::ChunkData(ChunkDataPayload {
                         transfer_id,
                         file_id,
                         chunk_id,
-                        file_offset: entry.file_offset,
-                        payload_length: entry.payload_length,
-                        checksum,
-                        payload,
+                        file_offset: prepared.entry.file_offset,
+                        payload_length: prepared.entry.payload_length,
+                        checksum: prepared.checksum,
+                        payload: prepared.payload,
                     });
 
                     if let Err(e) = transport.send_frame(&chunk_msg).await {
-                        // Transport failed -> return unacked chunks from this worker to shared pending queue
-                        let mut p = pending.lock().await;
-                        p.push_front(entry);
+                        // Transport failed -> return unacked chunks from this worker to retry channel
+                        let _ = retry_tx.send(prepared.entry);
                         for cid in worker_in_flight.drain() {
                             if let Some(e) = plan_map.get(&cid) {
-                                p.push_front(e.clone());
+                                let _ = retry_tx.send(e.clone());
                             }
                         }
                         log::warn!("Multipath transport #{} send failed: {} -> requeued chunks", idx, e);
                         return Ok((idx, transport, false)); // Transport dropped
+                    }
+
+                    if let Message::ChunkData(d) = chunk_msg {
+                        let _ = recycle_tx.send(d.payload);
                     }
 
                     worker_in_flight.insert(chunk_id);
@@ -675,7 +789,7 @@ pub async fn send_file_session_multipath(
                                         &mut worker_in_flight,
                                         &completed,
                                         &plan_map,
-                                        &pending,
+                                        &retry_tx,
                                         transfer_id,
                                         &bytes_sent,
                                         &chunks_done,
@@ -683,10 +797,9 @@ pub async fn send_file_session_multipath(
                                 }
                                 Ok(None) | Err(_) => {
                                     // Transport disconnected
-                                    let mut p = pending.lock().await;
                                     for cid in worker_in_flight.drain() {
                                         if let Some(e) = plan_map.get(&cid) {
-                                            p.push_front(e.clone());
+                                            let _ = retry_tx.send(e.clone());
                                         }
                                     }
                                     log::warn!("Multipath transport #{} EOF/error -> requeued chunks", idx);
@@ -708,17 +821,16 @@ pub async fn send_file_session_multipath(
                                         &mut worker_in_flight,
                                         &completed,
                                         &plan_map,
-                                        &pending,
+                                        &retry_tx,
                                         transfer_id,
                                         &bytes_sent,
                                         &chunks_done,
                                     ).await?;
                                 }
                                 Ok(None) | Err(_) => {
-                                    let mut p = pending.lock().await;
                                     for cid in worker_in_flight.drain() {
                                         if let Some(e) = plan_map.get(&cid) {
-                                            p.push_front(e.clone());
+                                            let _ = retry_tx.send(e.clone());
                                         }
                                     }
                                     return Ok((idx, transport, false));
@@ -748,6 +860,12 @@ pub async fn send_file_session_multipath(
             }
         }
     }
+
+    is_cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+    drop(shared_retry_tx);
+    drop(shared_recycle_tx);
+    drop(shared_prepared_rx);
+    let _ = reader_handle.await;
 
     let final_done = {
         let c = shared_completed.lock().await;
@@ -969,7 +1087,7 @@ where
                     completed_chunks_count,
                 );
 
-                // Send ACK immediately to keep TCP sender pipeline flowing
+                // Send immediate ChunkAck for 100% universal sender compatibility
                 let ack = Message::ChunkAck(ChunkAckData {
                     transfer_id: chunk_data.transfer_id,
                     chunk_id: chunk_data.chunk_id,

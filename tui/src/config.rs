@@ -36,7 +36,7 @@ impl Default for TurboSettings {
         };
 
         Self {
-            chunk_size_mib: 64,
+            chunk_size_mib: 2,
             buffer_count: 8,
             scheduling: "Adaptive".to_string(),
             transport_pref: "Automatic".to_string(),

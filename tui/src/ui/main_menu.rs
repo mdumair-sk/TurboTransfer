@@ -31,7 +31,7 @@ pub fn render_main_menu(f: &mut Frame, app: &AppState, area: Rect) {
             Span::styled("TURBOTRANSFER ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             Span::styled("v0.1.0-mvp", Style::default().fg(Color::DarkGray)),
         ]),
-        Line::from(Span::styled("Multipath High-Speed Transfer Engine (USB 3.0 + 5GHz Wi-Fi Direct)", Style::default().fg(Color::Gray))),
+        Line::from(Span::styled("Multipath High-Speed Transfer Engine (USB + 5GHz Wi-Fi Direct)", Style::default().fg(Color::Gray))),
     ])
     .alignment(Alignment::Center);
     f.render_widget(title_para, chunks[0]);

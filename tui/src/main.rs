@@ -17,8 +17,10 @@ use app::AppState;
 use events::handle_key_event;
 use ui::render_ui;
 
-/// Centralized cleanup to guarantee rollback of receiver state upon exit.
+/// Centralized cleanup to guarantee rollback of terminal state and receiver state upon exit.
 fn perform_cleanup() {
+    let _ = disable_raw_mode();
+    let _ = execute!(stdout(), LeaveAlternateScreen, crossterm::cursor::Show);
     // Stop all core transfer listeners
     let _ = leave_receive_mode(None);
 }
@@ -28,11 +30,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Set panic hook to ensure terminal restoration and clean exit
     let default_panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = disable_raw_mode();
-        let _ = execute!(stdout(), LeaveAlternateScreen);
         perform_cleanup();
         default_panic(info);
     }));
+
+    // Dedicated Ctrl+C signal task to ensure instant terminal recovery & exit
+    tokio::spawn(async {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            perform_cleanup();
+            std::process::exit(0);
+        }
+    });
 
     // 1. Initialize Terminal immediately (<1ms)
     enable_raw_mode()?;
@@ -89,11 +97,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 4. Clean Terminal Restoration & State Rollback
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
-
     perform_cleanup();
-
-    Ok(())
+    std::process::exit(0);
 }
