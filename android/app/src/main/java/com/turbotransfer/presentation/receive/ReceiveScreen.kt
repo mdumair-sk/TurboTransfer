@@ -205,10 +205,10 @@ fun ReceiveScreen(
                             )
                             Text(
                                 text = when {
-                                    uiState.isDualChannelReady -> "⚡ Dual-Channel Multipath Ready (${uiState.usbLabel} + 5 GHz Wi-Fi)"
+                                    uiState.isDualChannelReady -> "⚡ Dual-Channel Multipath Ready (USB + 5 GHz Wi-Fi)"
                                     hotspotState.isActive -> "📡 5 GHz Local Hotspot Active"
                                     uiState.detectedIps.isNotEmpty() -> "📡 Wi-Fi Direct / LAN Ready"
-                                    uiState.usbAvailable -> "🔌 ${uiState.usbLabel} (ADB Tunnel) Ready"
+                                    uiState.usbAvailable -> "🔌 USB (ADB Tunnel) Ready"
                                     else -> "Waiting for USB or Wi-Fi link..."
                                 },
                                 fontSize = 12.sp,

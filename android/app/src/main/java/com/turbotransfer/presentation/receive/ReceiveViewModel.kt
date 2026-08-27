@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.turbotransfer.core.common.Resource
 import com.turbotransfer.domain.usecase.discovery.GetNetworkStatusUseCase
-import com.turbotransfer.domain.usecase.discovery.GetUsbSpeedLabelUseCase
 import com.turbotransfer.domain.usecase.hotspot.ObserveHotspotStateUseCase
 import com.turbotransfer.domain.usecase.hotspot.StartHotspotUseCase
 import com.turbotransfer.domain.usecase.hotspot.StopHotspotUseCase
@@ -28,7 +27,6 @@ class ReceiveViewModel @Inject constructor(
     private val startHotspotUseCase: StartHotspotUseCase,
     private val stopHotspotUseCase: StopHotspotUseCase,
     private val getNetworkStatusUseCase: GetNetworkStatusUseCase,
-    private val getUsbSpeedLabelUseCase: GetUsbSpeedLabelUseCase,
     private val getSettingsUseCase: GetSettingsUseCase,
     private val updateSettingsUseCase: UpdateSettingsUseCase
 ) : ViewModel() {
@@ -39,8 +37,7 @@ class ReceiveViewModel @Inject constructor(
     init {
         _uiState.update {
             it.copy(
-                destDir = getSettingsUseCase.getReceiveDestDir(),
-                usbLabel = getUsbSpeedLabelUseCase()
+                destDir = getSettingsUseCase.getReceiveDestDir()
             )
         }
 

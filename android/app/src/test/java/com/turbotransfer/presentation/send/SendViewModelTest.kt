@@ -37,7 +37,6 @@ class SendViewModelTest {
         private val _flow = MutableStateFlow<DiscoveredReceiverInfo?>(null)
         override fun observeReceiverDiscovery(): Flow<DiscoveredReceiverInfo?> = _flow.asStateFlow()
         override suspend fun getNetworkInterfacesAndUsb(): Pair<Boolean, List<String>> = Pair(false, emptyList())
-        override fun getUsbSpeedLabel(): String = "USB 2.0"
     }
 
     private class FakeHotspotRepository : HotspotRepository {

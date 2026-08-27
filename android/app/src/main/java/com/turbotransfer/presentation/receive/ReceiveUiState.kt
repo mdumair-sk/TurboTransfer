@@ -9,7 +9,6 @@ data class ReceiveUiState(
     val destDir: String = "",
     val usbAvailable: Boolean = false,
     val detectedIps: List<String> = emptyList(),
-    val usbLabel: String = "USB 2.0",
     val hotspotState: HotspotStateInfo = HotspotStateInfo(),
     val showQrDialog: Boolean = false,
     val activeIncomingSession: TransferSession? = null,

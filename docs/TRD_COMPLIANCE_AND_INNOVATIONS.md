@@ -1,4 +1,4 @@
-﻿# TurboTransfer — TRD Compliance, Architectural Innovations & System Evaluation
+# TurboTransfer — TRD Compliance, Architectural Innovations & System Evaluation
 
 **Date:** August 28, 2026  
 **Document Version:** 1.0  
@@ -50,19 +50,15 @@ During hardware testing and milestone delivery, we introduced several critical a
 │    - Automated credential handoff over ADB loopback; zero-config camera     │
 │      QR code pairing for pure wireless transfers.                           │
 │                                                                             │
-│ 3. Kernel sysfs Physical USB Probing (UsbHardwareHelper)                    │
-│    - Real-time kernel sysfs inspection (/sys/class/udc) reporting true      │
-│      link generation (USB 3.1+ 10Gbps / SuperSpeed 5Gbps / HighSpeed 480M). │
-│                                                                             │
-│ 4. OS Power Management Hardening (TransferLockManager)                      │
+│ 3. OS Power Management Hardening (TransferLockManager)                      │
 │    - Simultaneous FULL_LOW_LATENCY / FULL_HIGH_PERF WifiLocks + CPU         │
 │      partial WakeLocks preventing mobile OS transfer throttling.             │
 │                                                                             │
-│ 5. Full-Featured Jetpack Compose Material 3 Android Application             │
+│ 4. Full-Featured Jetpack Compose Material 3 Android Application             │
 │    - 5 reactive tabs (Send with SAF queue, Receive with radar & multi-IP,   │
 │      Transfer dashboard with dual speedometers, History, and Settings).     │
 │                                                                             │
-│ 6. 128 KB FrameReader Sliding Window Optimization                           │
+│ 5. 128 KB FrameReader Sliding Window Optimization                           │
 │    - Sustained ~44.8 MB/s over USB 2.0 (95%+ of physical 480 Mbps ceiling). │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -77,14 +73,7 @@ During hardware testing and milestone delivery, we introduced several critical a
 * Hotspot credentials (SSID, WPA2 passphrase, IP, port) are securely transmitted directly to the Windows host without broadcasting across public Wi-Fi.
 * For pure wireless transfers, an integrated QR code generator (`HotspotQrDialog.kt`) renders an on-screen pairing code for instant phone-to-PC connection.
 
-### Innovation 3: Kernel sysfs USB Hardware Link Probing
-* Android `UsbHardwareHelper` queries Linux kernel sysfs paths (`/sys/class/udc`, `/sys/class/android_usb`, `/sys/devices/platform/soc`) to detect true link capabilities:
-  * USB 3.1+ SuperSpeed+ (10 Gbps)
-  * USB SuperSpeed (5 Gbps)
-  * USB 2.0 High Speed (480 Mbps)
-  * USB 1.1 Full Speed (12 Mbps)
-
-### Innovation 4: Android Power Management Hardening
+### Innovation 3: Android Power Management Hardening
 * High-speed transfers trigger Android Doze, CPU power-gating, and 802.11 power-save polling.
 * `TransferLockManager` coordinates simultaneous acquisition of `WifiManager.WIFI_MODE_FULL_LOW_LATENCY` / `FULL_HIGH_PERF` WifiLocks and PowerManager partial `WAKE_LOCK`, ensuring continuous wire speed throughout multi-gigabyte transfers.
 

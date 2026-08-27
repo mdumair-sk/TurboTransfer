@@ -72,13 +72,6 @@ fun SettingsScreen(
                         Text("Hardware:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text("${Build.MANUFACTURER} ${Build.MODEL} (${Build.HARDWARE})", fontSize = 12.sp, fontWeight = FontWeight.Medium)
                     }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Detected USB:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(uiState.usbLabel, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1565C0))
-                    }
                 }
             }
         }

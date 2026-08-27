@@ -1,7 +1,5 @@
 package com.turbotransfer.data.repository
 
-import android.content.Context
-import com.turbotransfer.UsbHardwareHelper
 import com.turbotransfer.core.common.DispatcherProvider
 import com.turbotransfer.data.source.network.NetworkProbeDataSource
 import com.turbotransfer.domain.model.DiscoveredReceiverInfo
@@ -10,13 +8,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
-import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class DiscoveryRepositoryImpl @Inject constructor(
-    @ApplicationContext private val context: Context,
     private val networkProbeDataSource: NetworkProbeDataSource,
     private val dispatcherProvider: DispatcherProvider
 ) : DiscoveryRepository {
@@ -27,13 +23,12 @@ class DiscoveryRepositoryImpl @Inject constructor(
             val wifiReceiverIp = networkProbeDataSource.probeCandidateWifiReceivers()
             val wifiFound = wifiReceiverIp != null
             val wifiAddr = if (wifiFound) "$wifiReceiverIp:9876" else ""
-            val usbLabel = UsbHardwareHelper.getUsbSpeedLabel(context)
 
             val receiver = if (usbFound && wifiFound) {
                 DiscoveredReceiverInfo(
                     address = "127.0.0.1:9876,$wifiAddr",
                     displayName = "Windows PC / Desktop",
-                    transport = "$usbLabel + 5 GHz Wi-Fi (Multipath Active)",
+                    transport = "USB + 5 GHz Wi-Fi (Multipath Active)",
                     isReady = true,
                     isUsbAvailable = true,
                     isWifiAvailable = true
@@ -42,7 +37,7 @@ class DiscoveryRepositoryImpl @Inject constructor(
                 DiscoveredReceiverInfo(
                     address = "127.0.0.1:9876",
                     displayName = "Windows PC / Desktop",
-                    transport = "$usbLabel (ADB Tunnel)",
+                    transport = "USB (ADB Tunnel)",
                     isReady = true,
                     isUsbAvailable = true,
                     isWifiAvailable = false
@@ -69,9 +64,5 @@ class DiscoveryRepositoryImpl @Inject constructor(
         val usb = networkProbeDataSource.probeUsbTunnel()
         val ips = networkProbeDataSource.getLocalIpAddresses()
         return Pair(usb, ips)
-    }
-
-    override fun getUsbSpeedLabel(): String {
-        return UsbHardwareHelper.getUsbSpeedLabel(context)
     }
 }

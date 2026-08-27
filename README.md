@@ -109,7 +109,6 @@ TurboTransfer/
 │   │   ├── java/com/turbotransfer/
 │   │   │   ├── MainActivity.kt         # Edge-to-edge Compose activity
 │   │   │   ├── TurboTransferApplication.kt # Hilt application root
-│   │   │   ├── UsbHardwareHelper.kt    # Kernel sysfs USB speed detector
 │   │   │   ├── WifiHotspotManager.kt   # 5 GHz SoftAp & loopback control server
 │   │   │   ├── core/                   # Common dispatchers, resources, TransferLockManager
 │   │   │   ├── data/                   # Repositories, local/network data sources, RustCoreDataSource
@@ -175,7 +174,6 @@ The Android companion application is built with **Clean Architecture + MVI/MVVM*
 
 5. **Settings Screen (`SettingsScreen.kt`)**:
    * **Device Identity**: Custom device name broadcasted to peers.
-   * **Hardware USB Detection (`UsbHardwareHelper`)**: Reads kernel sysfs (`/sys/class/udc`, `/sys/class/android_usb`) to detect physical USB link speed (*USB 3.1+ 10 Gbps*, *USB 3.0 SuperSpeed 5 Gbps*, *USB 2.0 High Speed 480 Mbps*).
    * **5 GHz Band Enforcement (`SoftApConfiguration`)**: Forces 802.11ac 5 GHz band for Local Hotspots on Android 11+ (API 30+).
    * **High-Performance Lock Management (`TransferLockManager`)**: Prevents CPU throttling and Wi-Fi power-save sleep by acquiring `FULL_LOW_LATENCY` / `FULL_HIGH_PERF` WifiLocks and partial WakeLocks during active transfers.
 

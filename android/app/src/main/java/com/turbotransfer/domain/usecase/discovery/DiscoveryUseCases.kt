@@ -20,11 +20,3 @@ class GetNetworkStatusUseCase @Inject constructor(
         return discoveryRepository.getNetworkInterfacesAndUsb()
     }
 }
-
-class GetUsbSpeedLabelUseCase @Inject constructor(
-    private val discoveryRepository: DiscoveryRepository
-) {
-    operator fun invoke(): String {
-        return discoveryRepository.getUsbSpeedLabel()
-    }
-}

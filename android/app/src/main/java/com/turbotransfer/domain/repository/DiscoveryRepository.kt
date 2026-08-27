@@ -6,5 +6,4 @@ import kotlinx.coroutines.flow.Flow
 interface DiscoveryRepository {
     fun observeReceiverDiscovery(): Flow<DiscoveredReceiverInfo?>
     suspend fun getNetworkInterfacesAndUsb(): Pair<Boolean, List<String>>
-    fun getUsbSpeedLabel(): String
 }

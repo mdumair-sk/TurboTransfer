@@ -1,7 +1,6 @@
 package com.turbotransfer.presentation.settings
 
 import androidx.lifecycle.ViewModel
-import com.turbotransfer.domain.usecase.discovery.GetUsbSpeedLabelUseCase
 import com.turbotransfer.domain.usecase.settings.GetSettingsUseCase
 import com.turbotransfer.domain.usecase.settings.UpdateSettingsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -11,8 +10,7 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val getSettingsUseCase: GetSettingsUseCase,
-    private val updateSettingsUseCase: UpdateSettingsUseCase,
-    private val getUsbSpeedLabelUseCase: GetUsbSpeedLabelUseCase
+    private val updateSettingsUseCase: UpdateSettingsUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -23,8 +21,7 @@ class SettingsViewModel @Inject constructor(
             it.copy(
                 deviceName = getSettingsUseCase.getDeviceName(),
                 prefer5Ghz = getSettingsUseCase.is5GhzPreferred(),
-                autoWakeLock = getSettingsUseCase.isAutoWakeLockEnabled(),
-                usbLabel = getUsbSpeedLabelUseCase()
+                autoWakeLock = getSettingsUseCase.isAutoWakeLockEnabled()
             )
         }
     }
