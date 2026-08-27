@@ -131,7 +131,7 @@ The Android companion application is built with **Clean Architecture + MVI/MVVM*
 │    SendScreen │ ReceiveScreen │ TransferScreen │ History    │
 ├─────────────────────────────────────────────────────────────┤
 │                       Domain Layer                          │
-│   UseCases (Send, Receive, Hotspot, Discovery, Settings)   │
+│   UseCases (Send, Receive, Hotspot, Discovery, Settings)    │
 ├─────────────────────────────────────────────────────────────┤
 │                        Data Layer                           │
 │  Repository Implementations │ Local Storage │ Network Probe │
@@ -185,17 +185,17 @@ The Terminal User Interface is built with **Ratatui 0.28** and **Crossterm**, fe
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ 🚀 TurboTransfer TUI                                    [Mode: Multipath]   │
+│ 🚀 TurboTransfer TUI                                    [Mode: Multipath]   |
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  [1] Send Files        [3] Devices          [5] Benchmark                   │
 │  [2] Receive Mode      [4] Transfers        [6] Settings                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│   Active Transfer: 4K_Video_Raw_Footage.mkv (12.80 GB)                     │
-│   Progress: [██████████████████████████████░░░░░░] 76.4%                   │
+│   Active Transfer: 4K_Video_Raw_Footage.mkv (12.80 GB)                      │
+│   Progress: [██████████████████████████████░░░░░░] 76.4%                    │
 │                                                                             │
 │   Aggregate Speed : 84.2 MB/s                                               │
-│   ├─ USB ADB  : 38.6 MB/s (127.0.0.1:9876)                              │
+│   ├─ USB ADB  : 38.6 MB/s (127.0.0.1:9876)                                  │
 │   └─ 5GHz Wi-Fi   : 45.6 MB/s (192.168.43.1:9876)                           │
 │                                                                             │
 │   Chunks Completed: 153 / 200 (64 MiB/chunk) | In-Flight: 4 | Retries: 0    │
