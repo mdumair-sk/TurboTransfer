@@ -206,6 +206,11 @@ pub fn register_active_transfer(
 ) {
     let registry = get_registry();
     let mut map = registry.transfers.lock().unwrap();
+    if let Some(existing) = map.get(&transfer_id) {
+        if existing.role == TransferRole::Sender && role == TransferRole::Receiver {
+            return;
+        }
+    }
     let now = std::time::Instant::now();
     map.insert(
         transfer_id,
@@ -299,19 +304,19 @@ pub async fn start_transfer(
 
     let addr_default = DEFAULT_LOOPBACK_ADDR.to_string();
     let addr = address.as_deref().unwrap_or(&addr_default);
-    let mut transports: Vec<Box<dyn Transport>> = Vec::new();
+    let mut transports: Vec<(Box<dyn Transport>, bool)> = Vec::new();
     let mut transport_names: Vec<String> = Vec::new();
 
     let connect_res: Result<(), TransferSessionError> = async {
         match transport_pref {
             TransportPreference::UsbOnly => {
                 if let Ok(t) = TcpTransport::connect(addr).await {
-                    transports.push(Box::new(t));
+                    transports.push((Box::new(t), true));
                     transport_names.push("USB (ADB Tunnel)".to_string());
                 } else {
                     let config = UsbTransportConfig::new(9876, 9876);
                     let t = UsbTransport::connect(config).await?;
-                    transports.push(Box::new(t));
+                    transports.push((Box::new(t), true));
                     transport_names.push("USB (ADB Tunnel)".to_string());
                 }
             }
@@ -319,13 +324,13 @@ pub async fn start_transfer(
                 if let Some(ref explicit_addr) = address {
                     for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                         if let Ok(transport) = TcpTransport::connect(explicit_addr).await {
-                            transports.push(Box::new(transport));
+                            transports.push((Box::new(transport), false));
                             transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
                         }
                     }
                     if transports.is_empty() {
                         let transport = TcpTransport::connect(explicit_addr).await?;
-                        transports.push(Box::new(transport));
+                        transports.push((Box::new(transport), false));
                         transport_names.push("5 GHz Wi-Fi Direct".to_string());
                     }
                 } else {
@@ -342,13 +347,13 @@ pub async fn start_transfer(
                     let target_addr = format!("{}:{}", target_ip, config.port);
                     for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                         if let Ok(t) = TcpTransport::connect(&target_addr).await {
-                            transports.push(Box::new(t));
+                            transports.push((Box::new(t), false));
                             transport_names.push(format!("5 GHz Local-Only Hotspot (Stream #{})", stream_idx));
                         }
                     }
                     if transports.is_empty() {
                         let transport = WifiDirectTransport::connect(config).await?;
-                        transports.push(Box::new(transport));
+                        transports.push((Box::new(transport), false));
                         transport_names.push("5 GHz Local-Only Hotspot".to_string());
                     }
                 }
@@ -362,13 +367,13 @@ pub async fn start_transfer(
                                 let is_usb = trimmed.contains("127.0.0.1") || trimmed.contains("localhost") || trimmed.contains("usb");
                                 if is_usb {
                                     if let Ok(t) = TcpTransport::connect(trimmed).await {
-                                        transports.push(Box::new(t));
+                                        transports.push((Box::new(t), true));
                                         transport_names.push("USB (ADB Tunnel)".to_string());
                                     }
                                 } else {
                                     for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                                         if let Ok(t) = TcpTransport::connect(trimmed).await {
-                                            transports.push(Box::new(t));
+                                            transports.push((Box::new(t), false));
                                             transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
                                         }
                                     }
@@ -379,13 +384,13 @@ pub async fn start_transfer(
                         let is_usb = explicit_addr.contains("127.0.0.1") || explicit_addr.contains("localhost") || explicit_addr.contains("usb");
                         if is_usb {
                             if let Ok(t) = TcpTransport::connect(explicit_addr).await {
-                                transports.push(Box::new(t));
+                                transports.push((Box::new(t), true));
                                 transport_names.push("USB (ADB Tunnel)".to_string());
                             }
                         } else {
                             for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                                 if let Ok(t) = TcpTransport::connect(explicit_addr).await {
-                                    transports.push(Box::new(t));
+                                    transports.push((Box::new(t), false));
                                     transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
                                 }
                             }
@@ -396,12 +401,12 @@ pub async fn start_transfer(
                 if transports.is_empty() {
                     // 1. Connect USB channel
                     if let Ok(t) = TcpTransport::connect(DEFAULT_LOOPBACK_ADDR).await {
-                        transports.push(Box::new(t));
+                        transports.push((Box::new(t), true));
                         transport_names.push("USB (ADB Tunnel)".to_string());
                     } else {
                         let usb_config = UsbTransportConfig::new(9876, 9876);
                         if let Ok(t) = UsbTransport::connect(usb_config).await {
-                            transports.push(Box::new(t));
+                            transports.push((Box::new(t), true));
                             transport_names.push("USB (ADB Tunnel)".to_string());
                         }
                     }
@@ -412,7 +417,7 @@ pub async fn start_transfer(
                         for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                             if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(500), TcpTransport::connect(hotspot_ip)).await {
                                 if let Ok(transport) = t {
-                                    transports.push(Box::new(transport));
+                                    transports.push((Box::new(transport), false));
                                     transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
                                     connected_any = true;
                                 }
@@ -439,13 +444,13 @@ pub async fn start_transfer(
                                 let is_usb = trimmed.contains("127.0.0.1") || trimmed.contains("localhost") || trimmed.contains("usb");
                                 if is_usb {
                                     if let Ok(t) = TcpTransport::connect(trimmed).await {
-                                        transports.push(Box::new(t));
+                                        transports.push((Box::new(t), true));
                                         transport_names.push("USB (ADB Tunnel)".to_string());
                                     }
                                 } else {
                                     for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                                         if let Ok(t) = TcpTransport::connect(trimmed).await {
-                                            transports.push(Box::new(t));
+                                            transports.push((Box::new(t), false));
                                             transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
                                         }
                                     }
@@ -456,13 +461,13 @@ pub async fn start_transfer(
                         let is_usb = explicit_addr.contains("127.0.0.1") || explicit_addr.contains("localhost") || explicit_addr.contains("usb");
                         if is_usb {
                             if let Ok(t) = TcpTransport::connect(explicit_addr).await {
-                                transports.push(Box::new(t));
+                                transports.push((Box::new(t), true));
                                 transport_names.push("USB (ADB Tunnel)".to_string());
                             }
                         } else {
                             for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                                 if let Ok(t) = TcpTransport::connect(explicit_addr).await {
-                                    transports.push(Box::new(t));
+                                    transports.push((Box::new(t), false));
                                     transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
                                 }
                             }
@@ -476,7 +481,7 @@ pub async fn start_transfer(
                         // Probe USB reverse tunnel
                         if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(800), TcpTransport::connect(addr)).await {
                             if let Ok(transport) = t {
-                                transports.push(Box::new(transport));
+                                transports.push((Box::new(transport), true));
                                 transport_names.push("USB ADB Reverse Tunnel".to_string());
                             }
                         }
@@ -486,7 +491,7 @@ pub async fn start_transfer(
                             for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                                 if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(500), TcpTransport::connect(hotspot_ip)).await {
                                     if let Ok(transport) = t {
-                                        transports.push(Box::new(transport));
+                                        transports.push((Box::new(transport), false));
                                         transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
                                         connected_any = true;
                                     }
@@ -502,10 +507,10 @@ pub async fn start_transfer(
                     {
                         let usb_config = UsbTransportConfig::new(9876, 9876);
                         if let Ok(t) = UsbTransport::connect(usb_config).await {
-                            transports.push(Box::new(t));
+                            transports.push((Box::new(t), true));
                             transport_names.push("USB (ADB Tunnel)".to_string());
                         } else if let Ok(t) = TcpTransport::connect(addr).await {
-                            transports.push(Box::new(t));
+                            transports.push((Box::new(t), true));
                             transport_names.push("USB Tunnel".to_string());
                         }
 
@@ -515,7 +520,7 @@ pub async fn start_transfer(
                             for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                                 if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(400), TcpTransport::connect(hotspot_ip)).await {
                                     if let Ok(transport) = t {
-                                        transports.push(Box::new(transport));
+                                        transports.push((Box::new(transport), false));
                                         transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
                                         connected_any = true;
                                     }
@@ -530,7 +535,8 @@ pub async fn start_transfer(
 
                 if transports.is_empty() {
                     let t = TcpTransport::connect(addr).await?;
-                    transports.push(Box::new(t));
+                    let is_usb = addr.contains("127.0.0.1") || addr.contains("localhost");
+                    transports.push((Box::new(t), is_usb));
                     transport_names.push("TCP Transport".to_string());
                 }
             }
@@ -678,12 +684,13 @@ struct ActiveReceiveSession {
     pub file_path: PathBuf,
     pub part_path: PathBuf,
     pub disk_tx: tokio::sync::mpsc::Sender<DiskWriteCmd>,
-    pub tracker: Arc<tokio::sync::Mutex<InMemoryChunkTracker>>,
-    pub chunk_crcs: Arc<tokio::sync::Mutex<HashMap<u32, (u32, usize)>>>,
+    pub tracker: Arc<parking_lot::Mutex<InMemoryChunkTracker>>,
+    pub chunk_crcs: Arc<parking_lot::Mutex<HashMap<u32, (u32, usize)>>>,
     pub total_chunks: u32,
     pub bytes_recv_total: Arc<AtomicU64>,
     pub completed_chunks_count: Arc<AtomicU32>,
     pub is_completed: Arc<std::sync::atomic::AtomicBool>,
+    pub is_sender_in_same_process: bool,
 }
 
 static ACTIVE_RECEIVE_SESSIONS: std::sync::OnceLock<Mutex<HashMap<Uuid, Arc<ActiveReceiveSession>>>> =
@@ -745,7 +752,7 @@ async fn handle_incoming_receive_transport(
                 .write(true)
                 .create(true)
                 .open(&part_path)?;
-            file.set_len(offer.file_size)?;
+            crate::util::storage::preallocate_file(&file, offer.file_size)?;
 
             register_active_transfer(
                 offer.transfer_id,
@@ -756,7 +763,13 @@ async fn handle_incoming_receive_transport(
                 "Multi-Channel Ingestion".to_string(),
             );
 
-            let (disk_tx, mut disk_rx) = tokio::sync::mpsc::channel::<DiskWriteCmd>(32);
+            let is_sender_in_same_process = {
+                let reg = get_registry();
+                let reg_map = reg.transfers.lock().unwrap();
+                reg_map.get(&offer.transfer_id).map_or(false, |r| r.role == TransferRole::Sender)
+            };
+
+            let (disk_tx, mut disk_rx) = tokio::sync::mpsc::channel::<DiskWriteCmd>(128);
             let mut writer_file = file;
             tokio::task::spawn_blocking(move || {
                 use std::io::{Seek, SeekFrom, Write};
@@ -785,12 +798,13 @@ async fn handle_incoming_receive_transport(
                 file_path: final_path,
                 part_path,
                 disk_tx,
-                tracker: Arc::new(tokio::sync::Mutex::new(InMemoryChunkTracker::new())),
-                chunk_crcs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+                tracker: Arc::new(parking_lot::Mutex::new(InMemoryChunkTracker::new())),
+                chunk_crcs: Arc::new(parking_lot::Mutex::new(HashMap::new())),
                 total_chunks: offer.total_chunks,
                 bytes_recv_total: Arc::new(AtomicU64::new(0)),
                 completed_chunks_count: Arc::new(AtomicU32::new(0)),
                 is_completed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                is_sender_in_same_process,
             });
             map.insert(offer.transfer_id, new_session.clone());
             new_session
@@ -825,7 +839,7 @@ async fn handle_incoming_receive_transport(
                 }
 
                 let is_duplicate = {
-                    let tracker = session.tracker.lock().await;
+                    let tracker = session.tracker.lock();
                     tracker.is_chunk_completed(
                         chunk_data.transfer_id,
                         chunk_data.file_id,
@@ -835,6 +849,14 @@ async fn handle_incoming_receive_transport(
                 };
 
                 if is_duplicate {
+                    // Fix B2: Ensure chunk_crcs is populated even on duplicates so total_chunks match at Complete
+                    {
+                        let mut crc_map = session.chunk_crcs.lock();
+                        if !crc_map.contains_key(&chunk_data.chunk_id) {
+                            let chunk_crc = crate::checksum::compute_crc32c(&chunk_data.payload);
+                            crc_map.insert(chunk_data.chunk_id, (chunk_crc, chunk_data.payload.len()));
+                        }
+                    }
                     let ack = Message::ChunkAck(ChunkAckData {
                         transfer_id: chunk_data.transfer_id,
                         chunk_id: chunk_data.chunk_id,
@@ -846,14 +868,14 @@ async fn handle_incoming_receive_transport(
                 let chunk_crc = crate::checksum::compute_crc32c(&chunk_data.payload);
                 let payload_len = chunk_data.payload.len();
                 {
-                    let mut tracker = session.tracker.lock().await;
+                    let mut tracker = session.tracker.lock();
                     tracker.mark_chunk_completed(
                         chunk_data.transfer_id,
                         chunk_data.file_id,
                         chunk_data.chunk_id,
                         chunk_data.checksum,
                     );
-                    session.chunk_crcs.lock().await.insert(chunk_data.chunk_id, (chunk_crc, payload_len));
+                    session.chunk_crcs.lock().insert(chunk_data.chunk_id, (chunk_crc, payload_len));
                 }
 
                 let total_b = session
@@ -861,8 +883,11 @@ async fn handle_incoming_receive_transport(
                     .fetch_add(chunk_data.payload_length as u64, Ordering::Relaxed)
                     + chunk_data.payload_length as u64;
                 let total_c = session.completed_chunks_count.fetch_add(1, Ordering::Relaxed) + 1;
-                update_transfer_progress(chunk_data.transfer_id, total_b, total_c);
-                record_channel_bytes(chunk_data.transfer_id, is_usb, chunk_data.payload_length as u64);
+
+                if !session.is_sender_in_same_process {
+                    update_transfer_progress(chunk_data.transfer_id, total_b, total_c);
+                    record_channel_bytes(chunk_data.transfer_id, is_usb, chunk_data.payload_length as u64);
+                }
 
                 // Send immediate ChunkAck for 100% universal sender compatibility
                 let ack = Message::ChunkAck(ChunkAckData {
@@ -889,7 +914,7 @@ async fn handle_incoming_receive_transport(
 
                     // In-Flight O(1) Checksum calculation via GF(2) matrix CRC32C combination
                     let file_crc = {
-                        let crc_map = session.chunk_crcs.lock().await;
+                        let crc_map = session.chunk_crcs.lock();
                         if crc_map.len() == session.total_chunks as usize {
                             let mut acc = crate::checksum::Crc32cAccumulator::new();
                             for cid in 0..session.total_chunks {
@@ -926,14 +951,63 @@ async fn handle_incoming_receive_transport(
                         .remove(&complete_data.transfer_id);
                 }
 
+                // Send final completion ACK
                 let ack = Message::ChunkAck(ChunkAckData {
                     transfer_id: complete_data.transfer_id,
                     chunk_id: u32::MAX,
                 });
                 transport.send_frame(&ack).await?;
-                return Ok(());
+                break;
+            }
+            Message::Pause(pause_data) => {
+                set_transfer_status(pause_data.transfer_id, TransferStatus::Paused, None);
+                let ack = Message::ChunkAck(ChunkAckData {
+                    transfer_id: pause_data.transfer_id,
+                    chunk_id: u32::MAX - 1,
+                });
+                transport.send_frame(&ack).await?;
+            }
+            Message::Resume(resume_data) => {
+                set_transfer_status(resume_data.transfer_id, TransferStatus::InProgress, None);
+                let ack = Message::ChunkAck(ChunkAckData {
+                    transfer_id: resume_data.transfer_id,
+                    chunk_id: u32::MAX - 2,
+                });
+                transport.send_frame(&ack).await?;
+            }
+            Message::Cancel(cancel_data) => {
+                set_transfer_status(cancel_data.transfer_id, TransferStatus::Cancelled, None);
+                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                let _ = session.disk_tx.send(DiskWriteCmd::Close(reply_tx)).await;
+                let _ = reply_rx.await;
+                let _ = std::fs::remove_file(&session.part_path);
+                get_active_receive_sessions()
+                    .lock()
+                    .unwrap()
+                    .remove(&cancel_data.transfer_id);
+                break;
+            }
+            Message::Heartbeat(hb) => {
+                let reply = Message::Heartbeat(crate::protocol::HeartbeatData {
+                    sequence: hb.sequence + 1,
+                });
+                transport.send_frame(&reply).await?;
             }
             _ => {}
+        }
+    }
+
+    // Fix B4: If transfer failed or cancelled, clean up the active receive session to release disk writer and file handle
+    if let Some(status) = transfer_control_status(offer.transfer_id) {
+        if status == TransferStatus::Failed || status == TransferStatus::Cancelled {
+            let session_opt = {
+                let mut map = get_active_receive_sessions().lock().unwrap();
+                map.remove(&offer.transfer_id)
+            };
+            if let Some(s) = session_opt {
+                let (reply_tx, _) = tokio::sync::oneshot::channel();
+                let _ = s.disk_tx.send(DiskWriteCmd::Close(reply_tx)).await;
+            }
         }
     }
 
@@ -948,15 +1022,14 @@ pub fn leave_receive_mode(address: Option<&str>) -> bool {
             listener.abort.abort();
             return true;
         }
-        return false;
+        false
+    } else {
+        let empty = listeners.is_empty();
+        for (_, listener) in listeners.drain() {
+            listener.abort.abort();
+        }
+        !empty
     }
-
-    let active = std::mem::take(&mut *listeners);
-    let stopped = !active.is_empty();
-    for listener in active.into_values() {
-        listener.abort.abort();
-    }
-    stopped
 }
 
 /// Pauses an active transfer (§7).
@@ -1082,6 +1155,7 @@ pub async fn resume_transfer(
             tid,
             transport,
             Some(&custom_name),
+            None,
         )
         .await;
     });
@@ -1092,6 +1166,10 @@ pub async fn resume_transfer(
 /// Cancels an active transfer (§7).
 pub fn cancel_transfer(transfer_id: Uuid) {
     set_transfer_status(transfer_id, TransferStatus::Cancelled, None);
+    if let Some(s) = get_active_receive_sessions().lock().unwrap().remove(&transfer_id) {
+        let (reply_tx, _) = tokio::sync::oneshot::channel();
+        let _ = s.disk_tx.try_send(DiskWriteCmd::Close(reply_tx));
+    }
     let registry = get_registry();
     let map = registry.transfers.lock().unwrap();
     if let Some(record) = map.get(&transfer_id) {

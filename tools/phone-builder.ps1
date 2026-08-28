@@ -149,7 +149,7 @@ elseif ($Command -eq "test") {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
     $pkgFlag = if ($Package -eq "workspace") { "--workspace" } else { "-p $Package" }
-    $filter = if ($TestFilter) { "-- $TestFilter" } else { "" }
+    $filter = if ($TestFilter) { "-- $TestFilter --nocapture" } else { "-- --nocapture" }
     Invoke-PhoneSSH -RemoteCommand "cd ~/turbotransfer; cargo test $pkgFlag $filter"
     $sw.Stop()
     $elapsedSec = [math]::Round($sw.Elapsed.TotalSeconds, 2)

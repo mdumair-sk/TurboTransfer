@@ -77,7 +77,7 @@ impl WifiDirectTransport {
     ///
     /// On Windows, this associates the wireless adapter to the SSID via native WLAN profiles
     /// and establishes a low-latency TCP socket connection.
-    pub async fn connect(mut config: WifiDirectConfig) -> Result<Self, TransportError> {
+    pub async fn connect(#[allow(unused_mut)] mut config: WifiDirectConfig) -> Result<Self, TransportError> {
         info!(
             "Initiating Wi-Fi Direct transport connection to SSID='{}', target={}:{}",
             config.ssid, config.target_ip, config.port
@@ -256,7 +256,7 @@ impl WifiDirectTransport {
 
     /// Discovers active Android 5 GHz Hotspot credentials via the USB control channel (port 9875).
     /// If Android has not started the hotspot yet, it triggers it via ADB and retries polling.
-    pub async fn discover_android_hotspot(serial: Option<&str>) -> Option<WifiDirectConfig> {
+    pub async fn discover_android_hotspot(#[allow(unused_variables)] serial: Option<&str>) -> Option<WifiDirectConfig> {
         #[cfg(target_os = "windows")]
         {
             let target_serial = match serial {

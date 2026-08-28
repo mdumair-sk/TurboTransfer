@@ -151,6 +151,7 @@ async fn test_tcp_transport_wildcard_binding_and_file_transfer() {
             Uuid::new_v4(),
             transport,
             None,
+            None,
         )
         .await
     });
@@ -195,7 +196,7 @@ async fn test_tcp_transport_bidirectional_transfers() {
 
         let send = tokio::spawn(async move {
             let transport = TcpTransport::connect(&addr).await.unwrap();
-            send_file_session(Uuid::new_v4(), "NodeA", &src, 64 * 1024, Uuid::new_v4(), transport, None).await
+            send_file_session(Uuid::new_v4(), "NodeA", &src, 64 * 1024, Uuid::new_v4(), transport, None, None).await
         });
 
         let (r, s) = tokio::join!(rec, send);
@@ -219,7 +220,7 @@ async fn test_tcp_transport_bidirectional_transfers() {
 
         let send = tokio::spawn(async move {
             let transport = TcpTransport::connect(&addr).await.unwrap();
-            send_file_session(Uuid::new_v4(), "NodeB", &src, 64 * 1024, Uuid::new_v4(), transport, None).await
+            send_file_session(Uuid::new_v4(), "NodeB", &src, 64 * 1024, Uuid::new_v4(), transport, None, None).await
         });
 
         let (r, s) = tokio::join!(rec, send);

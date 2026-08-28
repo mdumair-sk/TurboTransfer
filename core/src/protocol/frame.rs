@@ -152,7 +152,7 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
     pub fn with_max_frame_size(reader: R, max_frame_size: usize) -> Self {
         Self {
             reader,
-            buffer: BytesMut::with_capacity(512 * 1024),
+            buffer: BytesMut::with_capacity(4 * 1024 * 1024),
             max_frame_size,
         }
     }
@@ -182,12 +182,16 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
                     let msg = decode_frame(&frame_bytes)?;
                     return Ok(Some(msg));
                 }
-            }
 
-            // Read directly into BytesMut buffer without any stack buffer allocation or intermediate copy
-            if self.buffer.capacity() - self.buffer.len() < 256 * 1024 {
+                // Exact length known -> allocate remaining frame bytes in one single continuous buffer
+                let needed = total_frame_len - self.buffer.len();
+                if self.buffer.capacity() - self.buffer.len() < needed {
+                    self.buffer.reserve(needed);
+                }
+            } else if self.buffer.capacity() - self.buffer.len() < 64 * 1024 {
                 self.buffer.reserve(512 * 1024);
             }
+
             let bytes_read = self.reader.read_buf(&mut self.buffer).await?;
             if bytes_read == 0 {
                 if self.buffer.is_empty() {

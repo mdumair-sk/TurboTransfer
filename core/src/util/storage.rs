@@ -49,6 +49,23 @@ pub fn open_sequential_read<P: AsRef<Path>>(path: P) -> std::io::Result<File> {
     }
 }
 
+pub fn preallocate_file(file: &File, file_size: u64) -> std::io::Result<()> {
+    // Always set logical size first — required for read_exact / file cursor operations to work
+    file.set_len(file_size)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::AsRawFd;
+        let fd = file.as_raw_fd();
+        // Advisory: pre-allocate contiguous blocks to avoid fragmentation and random write stalls
+        unsafe {
+            libc::posix_fallocate(fd, 0, file_size as libc::off_t);
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

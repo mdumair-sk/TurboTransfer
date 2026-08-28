@@ -19,14 +19,32 @@ pub struct TcpTransport {
     bytes_received: Arc<AtomicU64>,
 }
 
-/// Configures high-performance TCP socket parameters (TCP_NODELAY + 4MB send/recv buffers)
+/// Configures high-performance TCP socket parameters (TCP_NODELAY + high BDP buffer sizing)
 /// to maximize Bandwidth-Delay Product (BDP) over 5 GHz Wi-Fi and high-speed USB links.
 pub fn configure_tcp_stream(stream: &TcpStream) {
     let _ = stream.set_nodelay(true);
     const BUFFER_SIZE: usize = 4 * 1024 * 1024;
     let sock = socket2::SockRef::from(stream);
-    let _ = sock.set_recv_buffer_size(BUFFER_SIZE);
-    let _ = sock.set_send_buffer_size(BUFFER_SIZE);
+    #[cfg(windows)]
+    {
+        let _ = sock.set_recv_buffer_size(BUFFER_SIZE);
+        let _ = sock.set_send_buffer_size(BUFFER_SIZE);
+    }
+    #[cfg(not(windows))]
+    {
+        // On Linux / Android, only raise buffer floor if default is below 2MB,
+        // preserving the kernel's dynamic TCP window scaling (tcp_wmem / tcp_rmem).
+        if let Ok(cur_rcv) = sock.recv_buffer_size() {
+            if cur_rcv < 2 * 1024 * 1024 {
+                let _ = sock.set_recv_buffer_size(BUFFER_SIZE);
+            }
+        }
+        if let Ok(cur_snd) = sock.send_buffer_size() {
+            if cur_snd < 2 * 1024 * 1024 {
+                let _ = sock.set_send_buffer_size(BUFFER_SIZE);
+            }
+        }
+    }
 }
 
 impl TcpTransport {

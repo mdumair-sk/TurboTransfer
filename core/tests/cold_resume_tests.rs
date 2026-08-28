@@ -11,6 +11,14 @@ use turbotransfer_core::transport::TcpTransport;
 
 #[tokio::test]
 async fn test_cold_resume_process_restart_mid_transfer() {
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        run_cold_resume_test().await;
+    })
+    .await
+    .expect("test_cold_resume_process_restart_mid_transfer timed out after 30s");
+}
+
+async fn run_cold_resume_test() {
     let temp_dir = tempfile::tempdir().unwrap();
     let src_path = temp_dir.path().join("source_video.mp4");
     let dest_dir = temp_dir.path().join("dest");
@@ -137,6 +145,7 @@ async fn test_cold_resume_process_restart_mid_transfer() {
             chunk_size as u32,
             transfer_id,
             sender_transport,
+            None,
             None,
         )
         .await
