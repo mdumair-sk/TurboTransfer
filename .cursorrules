@@ -1,0 +1,13 @@
+# MANDATORY SNAPDRAGON 8 ELITE COMPILATION POLICY
+# ALWAYS offload Rust compilations, test suites, and Android core builds to the phone via ADB.
+# DO NOT compile heavy Rust targets on the host Ryzen 5 3550H laptop.
+
+# Build Core:
+powershell -ExecutionPolicy Bypass -File .\tools\phone-builder.ps1 build-core
+
+# Run Tests:
+powershell -ExecutionPolicy Bypass -File .\tools\phone-builder.ps1 test -Package turbotransfer-core
+powershell -ExecutionPolicy Bypass -File .\tools\phone-builder.ps1 test -Package workspace
+
+# Check Phone Node:
+powershell -ExecutionPolicy Bypass -File .\tools\phone-builder.ps1 status

@@ -225,6 +225,8 @@ where
     let mut in_flight: std::collections::HashSet<u32> = std::collections::HashSet::new();
     let total_chunks_needed = plan_map.len();
     let is_usb = transport.kind() == crate::transport::TransportKind::Usb || transport.kind() == crate::transport::TransportKind::Tcp;
+    let (running_crc_tx, running_crc_rx) = tokio::sync::oneshot::channel::<u32>();
+    let total_plan_chunks = plan_map.len();
 
     if completed_set.len() < total_chunks_needed {
         let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel::<PreparedChunk>(8);
@@ -238,8 +240,9 @@ where
         let mut pending_reader_chunks = chunks_to_send;
 
         let reader_handle = tokio::task::spawn_blocking(move || -> Result<(), std::io::Error> {
-            let mut file = std::fs::File::open(&reader_file_path)?;
+            let mut file = crate::util::storage::open_sequential_read(&reader_file_path)?;
             let mut buffer_pool: Vec<Vec<u8>> = Vec::with_capacity(16);
+            let mut chunk_crc_map: std::collections::HashMap<u32, (u32, usize)> = std::collections::HashMap::new();
 
             loop {
                 if reader_cancelled.load(std::sync::atomic::Ordering::Relaxed) {
@@ -274,11 +277,28 @@ where
                 file.seek(std::io::SeekFrom::Start(entry.file_offset))?;
                 crate::chunk::read_chunk_into_slice(&mut file, entry.file_offset, &mut buf)?;
 
+                let chunk_crc = crate::checksum::compute_crc32c(&buf);
+                chunk_crc_map.insert(entry.chunk_id, (chunk_crc, buf.len()));
+
                 let checksum = compute_xxhash64(&buf);
                 if chunk_tx.blocking_send(PreparedChunk { entry, payload: buf, checksum }).is_err() {
                     break;
                 }
             }
+
+            // In-flight O(1) finalization: combine CRC32Cs of all chunks in order if read completely
+            if chunk_crc_map.len() == total_plan_chunks {
+                let mut acc = crate::checksum::Crc32cAccumulator::new();
+                for cid in 0..total_plan_chunks as u32 {
+                    if let Some(&(crc, len)) = chunk_crc_map.get(&cid) {
+                        acc.combine(crc, len);
+                    }
+                }
+                let _ = running_crc_tx.send(acc.finalize());
+            } else if let Ok(crc) = crate::checksum::compute_file_crc32c(&reader_file_path) {
+                let _ = running_crc_tx.send(crc);
+            }
+
             Ok(())
         });
 
@@ -366,7 +386,10 @@ where
     }
 
     // 6. Complete transfer
-    let file_checksum = compute_file_crc32c(file_path)?;
+    let file_checksum = match running_crc_rx.await {
+        Ok(c) => c,
+        Err(_) => compute_file_crc32c(file_path)?,
+    };
     let complete_msg = Message::Complete(CompleteData {
         transfer_id,
         file_checksum,
@@ -633,6 +656,8 @@ pub async fn send_file_session_multipath(
     let (retry_tx, retry_rx) = std::sync::mpsc::channel::<crate::chunk::ChunkPlanEntry>();
     let (recycle_tx, recycle_rx) = std::sync::mpsc::channel::<Vec<u8>>();
     let is_cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (running_crc_tx, running_crc_rx) = tokio::sync::oneshot::channel::<u32>();
+    let total_plan_chunks = plan.len();
 
     let reader_file_path = file_path.to_path_buf();
     let reader_cancelled = std::sync::Arc::clone(&is_cancelled);
@@ -640,8 +665,9 @@ pub async fn send_file_session_multipath(
     let mut pending_reader_chunks = initial_chunks_to_send;
 
     let reader_handle = tokio::task::spawn_blocking(move || -> Result<(), std::io::Error> {
-        let mut file = std::fs::File::open(&reader_file_path)?;
+        let mut file = crate::util::storage::open_sequential_read(&reader_file_path)?;
         let mut buffer_pool: Vec<Vec<u8>> = Vec::with_capacity(32);
+        let mut chunk_crc_map: std::collections::HashMap<u32, (u32, usize)> = std::collections::HashMap::new();
 
         loop {
             if reader_cancelled.load(std::sync::atomic::Ordering::Relaxed) {
@@ -676,11 +702,28 @@ pub async fn send_file_session_multipath(
             file.seek(std::io::SeekFrom::Start(entry.file_offset))?;
             crate::chunk::read_chunk_into_slice(&mut file, entry.file_offset, &mut buf)?;
 
+            let chunk_crc = crate::checksum::compute_crc32c(&buf);
+            chunk_crc_map.insert(entry.chunk_id, (chunk_crc, buf.len()));
+
             let checksum = compute_xxhash64(&buf);
             if prepared_tx.blocking_send(PreparedChunk { entry, payload: buf, checksum }).is_err() {
                 break;
             }
         }
+
+        // In-flight O(1) finalization: combine CRC32Cs of all chunks in order if read completely
+        if chunk_crc_map.len() == total_plan_chunks {
+            let mut acc = crate::checksum::Crc32cAccumulator::new();
+            for cid in 0..total_plan_chunks as u32 {
+                if let Some(&(crc, len)) = chunk_crc_map.get(&cid) {
+                    acc.combine(crc, len);
+                }
+            }
+            let _ = running_crc_tx.send(acc.finalize());
+        } else if let Ok(crc) = crate::checksum::compute_file_crc32c(&reader_file_path) {
+            let _ = running_crc_tx.send(crc);
+        }
+
         Ok(())
     });
 
@@ -880,7 +923,10 @@ pub async fn send_file_session_multipath(
 
     // 3. Complete transfer on the first surviving transport
     if let Some(mut primary_transport) = returned_transports.into_iter().next() {
-        let file_checksum = compute_file_crc32c(file_path)?;
+        let file_checksum = match running_crc_rx.await {
+            Ok(c) => c,
+            Err(_) => compute_file_crc32c(file_path)?,
+        };
         let complete_msg = Message::Complete(CompleteData {
             transfer_id,
             file_checksum,
@@ -1036,6 +1082,7 @@ where
 
     let mut bytes_recv_total = 0u64;
     let mut completed_chunks_count = 0u32;
+    let mut chunk_crcs: std::collections::HashMap<u32, (u32, usize)> = std::collections::HashMap::new();
 
     // 6. Data Plane Receive Loop
     loop {
@@ -1072,6 +1119,9 @@ where
                     continue;
                 }
 
+                let chunk_crc = crate::checksum::compute_crc32c(&chunk_data.payload);
+                chunk_crcs.insert(chunk_data.chunk_id, (chunk_crc, chunk_data.payload.len()));
+
                 tracker.mark_chunk_completed(
                     chunk_data.transfer_id,
                     chunk_data.file_id,
@@ -1079,13 +1129,16 @@ where
                     chunk_data.checksum,
                 );
 
-                bytes_recv_total += chunk_data.payload_length as u64;
+                let chunk_len = chunk_data.payload_length as u64;
+                bytes_recv_total += chunk_len;
                 completed_chunks_count += 1;
                 update_transfer_progress(
                     chunk_data.transfer_id,
                     bytes_recv_total,
                     completed_chunks_count,
                 );
+                let is_usb = transport.kind() == crate::transport::TransportKind::Usb;
+                crate::transfer::api::record_channel_bytes(chunk_data.transfer_id, is_usb, chunk_len);
 
                 // Send immediate ChunkAck for 100% universal sender compatibility
                 let ack = Message::ChunkAck(ChunkAckData {
@@ -1107,8 +1160,21 @@ where
                     res?;
                 }
 
-                // Verify file-level Castagnoli CRC32C
-                let file_crc = compute_file_crc32c(&part_path)?;
+                // In-Flight O(1) Castagnoli CRC32C verification
+                let file_crc = {
+                    if chunk_crcs.len() == offer.total_chunks as usize {
+                        let mut acc = crate::checksum::Crc32cAccumulator::new();
+                        for cid in 0..offer.total_chunks {
+                            if let Some(&(crc, len)) = chunk_crcs.get(&cid) {
+                                acc.combine(crc, len);
+                            }
+                        }
+                        acc.finalize()
+                    } else {
+                        compute_file_crc32c(&part_path)?
+                    }
+                };
+
                 if file_crc != complete_data.file_checksum {
                     set_transfer_status(
                         complete_data.transfer_id,

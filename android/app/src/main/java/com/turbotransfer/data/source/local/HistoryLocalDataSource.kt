@@ -56,6 +56,8 @@ class HistoryLocalDataSource @Inject constructor(
                         peakSpeedMBps = obj.optDouble("peakSpeedMBps", 0.0),
                         usbSpeedMBps = obj.optDouble("usbSpeedMBps", 0.0),
                         wifiSpeedMBps = obj.optDouble("wifiSpeedMBps", 0.0),
+                        peakUsbSpeedMBps = obj.optDouble("peakUsbSpeedMBps", obj.optDouble("usbSpeedMBps", 0.0)),
+                        peakWifiSpeedMBps = obj.optDouble("peakWifiSpeedMBps", obj.optDouble("wifiSpeedMBps", 0.0)),
                         status = obj.optString("status", "Completed")
                     )
                 )
@@ -95,6 +97,8 @@ class HistoryLocalDataSource @Inject constructor(
                     put("peakSpeedMBps", item.peakSpeedMBps)
                     put("usbSpeedMBps", item.usbSpeedMBps)
                     put("wifiSpeedMBps", item.wifiSpeedMBps)
+                    put("peakUsbSpeedMBps", item.peakUsbSpeedMBps)
+                    put("peakWifiSpeedMBps", item.peakWifiSpeedMBps)
                     put("status", item.status)
                 }
                 arr.put(obj)

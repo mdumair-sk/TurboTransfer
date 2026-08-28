@@ -28,6 +28,9 @@ uniffi = { version = "0.28", features = ["tokio", "build"] }
 uniffi_bindgen = "0.28"
 camino = "1.1"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [build-dependencies]
 uniffi = { version = "0.28", features = ["build"] }
 

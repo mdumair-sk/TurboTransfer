@@ -491,27 +491,16 @@ impl Transport for WifiDirectTransport {
         })?;
 
         let (header, maybe_payload) = encode_frame_parts(msg)?;
-        let mut frame_len = header.len() as u64;
+        let payload = maybe_payload.unwrap_or(&[]);
+        let frame_len = (header.len() + payload.len()) as u64;
 
-        if let Err(e) = writer.write_all(&header).await {
+        if let Err(e) = super::vectored::write_all_vectored(writer, &header, payload).await {
             self.status = TransportStatus::Disconnected;
             error!("Wi-Fi Direct socket write error -> marked Disconnected: {}", e);
             return Err(TransportError::Disconnected(format!(
                 "Wi-Fi Direct socket write failed: {}",
                 e
             )));
-        }
-
-        if let Some(payload) = maybe_payload {
-            frame_len += payload.len() as u64;
-            if let Err(e) = writer.write_all(payload).await {
-                self.status = TransportStatus::Disconnected;
-                error!("Wi-Fi Direct socket write error -> marked Disconnected: {}", e);
-                return Err(TransportError::Disconnected(format!(
-                    "Wi-Fi Direct socket write failed: {}",
-                    e
-                )));
-            }
         }
 
         if let Err(e) = writer.flush().await {

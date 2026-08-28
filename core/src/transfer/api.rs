@@ -104,6 +104,7 @@ pub struct ActiveTransferRecord {
     pub rolling_throughput_bps: Mutex<f64>,
     pub rolling_usb_throughput_bps: Mutex<f64>,
     pub rolling_wifi_throughput_bps: Mutex<f64>,
+    pub last_smoothed_eta: Mutex<Option<f64>>,
 }
 
 /// Global active transfer registry for progress queries and control operations.
@@ -231,6 +232,7 @@ pub fn register_active_transfer(
             rolling_throughput_bps: Mutex::new(0.0),
             rolling_usb_throughput_bps: Mutex::new(0.0),
             rolling_wifi_throughput_bps: Mutex::new(0.0),
+            last_smoothed_eta: Mutex::new(None),
         },
     );
 }
@@ -249,6 +251,8 @@ pub fn update_transfer_transport_name(transfer_id: Uuid, name: String) {
         record.transport_name = name;
     }
 }
+
+pub const DEFAULT_WIFI_PARALLEL_STREAMS: usize = 4;
 
 /// Starts a file transfer to a peer over `TcpTransport` or `UsbTransport` (§6, §7, §8).
 pub async fn start_transfer(
@@ -313,7 +317,7 @@ pub async fn start_transfer(
             }
             TransportPreference::WifiDirectOnly => {
                 if let Some(ref explicit_addr) = address {
-                    for stream_idx in 1..=2 {
+                    for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                         if let Ok(transport) = TcpTransport::connect(explicit_addr).await {
                             transports.push(Box::new(transport));
                             transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
@@ -336,7 +340,7 @@ pub async fn start_transfer(
                         config.target_ip.clone()
                     };
                     let target_addr = format!("{}:{}", target_ip, config.port);
-                    for stream_idx in 1..=2 {
+                    for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                         if let Ok(t) = TcpTransport::connect(&target_addr).await {
                             transports.push(Box::new(t));
                             transport_names.push(format!("5 GHz Local-Only Hotspot (Stream #{})", stream_idx));
@@ -362,7 +366,7 @@ pub async fn start_transfer(
                                         transport_names.push("USB (ADB Tunnel)".to_string());
                                     }
                                 } else {
-                                    for stream_idx in 1..=2 {
+                                    for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                                         if let Ok(t) = TcpTransport::connect(trimmed).await {
                                             transports.push(Box::new(t));
                                             transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
@@ -379,7 +383,7 @@ pub async fn start_transfer(
                                 transport_names.push("USB (ADB Tunnel)".to_string());
                             }
                         } else {
-                            for stream_idx in 1..=2 {
+                            for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                                 if let Ok(t) = TcpTransport::connect(explicit_addr).await {
                                     transports.push(Box::new(t));
                                     transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
@@ -402,20 +406,20 @@ pub async fn start_transfer(
                         }
                     }
 
-                    // 2. Connect Wi-Fi Direct channel with 2 bonded sockets
+                    // 2. Connect Wi-Fi Direct channel with bonded sockets
                     for hotspot_ip in &["10.18.163.130:9876", "192.168.43.1:9876", "192.168.43.2:9876", "192.168.1.19:9876"] {
-                        if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(500), TcpTransport::connect(hotspot_ip)).await {
-                            if let Ok(transport) = t {
-                                transports.push(Box::new(transport));
-                                transport_names.push("5 GHz Wi-Fi Direct (Stream #1)".to_string());
-                                if let Ok(t2) = tokio::time::timeout(tokio::time::Duration::from_millis(500), TcpTransport::connect(hotspot_ip)).await {
-                                    if let Ok(transport2) = t2 {
-                                        transports.push(Box::new(transport2));
-                                        transport_names.push("5 GHz Wi-Fi Direct (Stream #2)".to_string());
-                                    }
+                        let mut connected_any = false;
+                        for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
+                            if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(500), TcpTransport::connect(hotspot_ip)).await {
+                                if let Ok(transport) = t {
+                                    transports.push(Box::new(transport));
+                                    transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
+                                    connected_any = true;
                                 }
-                                break;
                             }
+                        }
+                        if connected_any {
+                            break;
                         }
                     }
                 }
@@ -439,7 +443,7 @@ pub async fn start_transfer(
                                         transport_names.push("USB (ADB Tunnel)".to_string());
                                     }
                                 } else {
-                                    for stream_idx in 1..=2 {
+                                    for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                                         if let Ok(t) = TcpTransport::connect(trimmed).await {
                                             transports.push(Box::new(t));
                                             transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
@@ -456,7 +460,7 @@ pub async fn start_transfer(
                                 transport_names.push("USB (ADB Tunnel)".to_string());
                             }
                         } else {
-                            for stream_idx in 1..=2 {
+                            for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                                 if let Ok(t) = TcpTransport::connect(explicit_addr).await {
                                     transports.push(Box::new(t));
                                     transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
@@ -478,12 +482,18 @@ pub async fn start_transfer(
                         }
                         // Probe Wi-Fi Direct / Hotspot gateway
                         for hotspot_ip in &["10.18.163.130:9876", "192.168.43.2:9876", "192.168.43.1:9876"] {
-                            if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(500), TcpTransport::connect(hotspot_ip)).await {
-                                if let Ok(transport) = t {
-                                    transports.push(Box::new(transport));
-                                    transport_names.push("5 GHz Wi-Fi Direct".to_string());
-                                    break;
+                            let mut connected_any = false;
+                            for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
+                                if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(500), TcpTransport::connect(hotspot_ip)).await {
+                                    if let Ok(transport) = t {
+                                        transports.push(Box::new(transport));
+                                        transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
+                                        connected_any = true;
+                                    }
                                 }
+                            }
+                            if connected_any {
+                                break;
                             }
                         }
                     }
@@ -499,20 +509,20 @@ pub async fn start_transfer(
                             transport_names.push("USB Tunnel".to_string());
                         }
 
-                        // If USB is already connected or probe hotspot, connect Wi-Fi with 2 streams
+                        // If USB is already connected or probe hotspot, connect Wi-Fi with bonded streams
                         for hotspot_ip in &["10.18.163.130:9876", "192.168.43.1:9876", "192.168.43.2:9876"] {
-                            if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(400), TcpTransport::connect(hotspot_ip)).await {
-                                if let Ok(transport) = t {
-                                    transports.push(Box::new(transport));
-                                    transport_names.push("5 GHz Wi-Fi Direct (Stream #1)".to_string());
-                                    if let Ok(t2) = tokio::time::timeout(tokio::time::Duration::from_millis(400), TcpTransport::connect(hotspot_ip)).await {
-                                        if let Ok(transport2) = t2 {
-                                            transports.push(Box::new(transport2));
-                                            transport_names.push("5 GHz Wi-Fi Direct (Stream #2)".to_string());
-                                        }
+                            let mut connected_any = false;
+                            for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
+                                if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(400), TcpTransport::connect(hotspot_ip)).await {
+                                    if let Ok(transport) = t {
+                                        transports.push(Box::new(transport));
+                                        transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
+                                        connected_any = true;
                                     }
-                                    break;
                                 }
+                            }
+                            if connected_any {
+                                break;
                             }
                         }
                     }
@@ -657,6 +667,7 @@ pub async fn enter_receive_mode(
     Ok(handle)
 }
 
+#[allow(dead_code)]
 enum DiskWriteCmd {
     Write { file_offset: u64, payload: Vec<u8> },
     Flush(tokio::sync::oneshot::Sender<std::io::Result<()>>),
@@ -668,6 +679,8 @@ struct ActiveReceiveSession {
     pub part_path: PathBuf,
     pub disk_tx: tokio::sync::mpsc::Sender<DiskWriteCmd>,
     pub tracker: Arc<tokio::sync::Mutex<InMemoryChunkTracker>>,
+    pub chunk_crcs: Arc<tokio::sync::Mutex<HashMap<u32, (u32, usize)>>>,
+    pub total_chunks: u32,
     pub bytes_recv_total: Arc<AtomicU64>,
     pub completed_chunks_count: Arc<AtomicU32>,
     pub is_completed: Arc<std::sync::atomic::AtomicBool>,
@@ -773,6 +786,8 @@ async fn handle_incoming_receive_transport(
                 part_path,
                 disk_tx,
                 tracker: Arc::new(tokio::sync::Mutex::new(InMemoryChunkTracker::new())),
+                chunk_crcs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+                total_chunks: offer.total_chunks,
                 bytes_recv_total: Arc::new(AtomicU64::new(0)),
                 completed_chunks_count: Arc::new(AtomicU32::new(0)),
                 is_completed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -828,6 +843,8 @@ async fn handle_incoming_receive_transport(
                     continue;
                 }
 
+                let chunk_crc = crate::checksum::compute_crc32c(&chunk_data.payload);
+                let payload_len = chunk_data.payload.len();
                 {
                     let mut tracker = session.tracker.lock().await;
                     tracker.mark_chunk_completed(
@@ -836,6 +853,7 @@ async fn handle_incoming_receive_transport(
                         chunk_data.chunk_id,
                         chunk_data.checksum,
                     );
+                    session.chunk_crcs.lock().await.insert(chunk_data.chunk_id, (chunk_crc, payload_len));
                 }
 
                 let total_b = session
@@ -869,7 +887,23 @@ async fn handle_incoming_receive_transport(
                         res?;
                     }
 
-                    let file_crc = compute_file_crc32c(&session.part_path)?;
+                    // In-Flight O(1) Checksum calculation via GF(2) matrix CRC32C combination
+                    let file_crc = {
+                        let crc_map = session.chunk_crcs.lock().await;
+                        if crc_map.len() == session.total_chunks as usize {
+                            let mut acc = crate::checksum::Crc32cAccumulator::new();
+                            for cid in 0..session.total_chunks {
+                                if let Some(&(crc, len)) = crc_map.get(&cid) {
+                                    acc.combine(crc, len);
+                                }
+                            }
+                            acc.finalize()
+                        } else {
+                            // Fallback to disk read only if chunks were missing in memory table (e.g. cold restart)
+                            compute_file_crc32c(&session.part_path)?
+                        }
+                    };
+
                     if file_crc != complete_data.file_checksum {
                         set_transfer_status(
                             complete_data.transfer_id,
@@ -1122,12 +1156,23 @@ pub fn get_progress(transfer_id: Uuid) -> Option<TransferProgress> {
         let mut end_time = record.end_time.lock().unwrap();
         let end_instant = *end_time.get_or_insert(now);
         let elapsed = end_instant.duration_since(record.start_time).as_secs_f64();
-        if elapsed > 0.05 {
+        if (usb_bytes > 0 || wifi_bytes > 0) && elapsed > 0.05 {
             (
                 (bytes as f64) / elapsed,
                 (usb_bytes as f64) / elapsed,
                 (wifi_bytes as f64) / elapsed,
             )
+        } else if elapsed > 0.05 {
+            let avg = (bytes as f64) / elapsed;
+            let is_usb = record.transport_name.contains("USB") || record.transport_name.contains("ADB") || record.transport_name.contains("127.0.0.1");
+            let is_wifi = record.transport_name.contains("Wi-Fi") || record.transport_name.contains("Hotspot") || record.transport_name.contains("P2P") || record.transport_name.contains("10.18.") || record.transport_name.contains("192.168.");
+            if is_usb && is_wifi {
+                (avg, avg * 0.5, avg * 0.5)
+            } else if is_wifi {
+                (avg, 0.0, avg)
+            } else {
+                (avg, avg, 0.0)
+            }
         } else {
             (0.0, 0.0, 0.0)
         }
@@ -1153,10 +1198,54 @@ pub fn get_progress(transfer_id: Uuid) -> Option<TransferProgress> {
     } else {
         100.0
     };
-    let eta = if throughput > 0.0 && bytes < record.file_size {
-        Some(((record.file_size - bytes) as f64 / throughput).ceil() as u64)
-    } else {
+
+    let eta = if status == TransferStatus::Completed || bytes >= record.file_size {
+        Some(0)
+    } else if is_terminal {
         None
+    } else {
+        let elapsed = now.duration_since(record.start_time).as_secs_f64();
+        let overall_avg_bps = if elapsed > 0.3 { (bytes as f64) / elapsed } else { 0.0 };
+        let rolling_bps = *rolling;
+
+        // Smarter weighted speed blending: blend 2-second moving average (70%) with session average (30%)
+        let effective_speed_bps = if elapsed < 2.0 {
+            if rolling_bps > 0.0 && overall_avg_bps > 0.0 {
+                rolling_bps.max(overall_avg_bps)
+            } else if rolling_bps > 0.0 {
+                rolling_bps
+            } else {
+                overall_avg_bps
+            }
+        } else {
+            if rolling_bps > 0.0 && overall_avg_bps > 0.0 {
+                (rolling_bps * 0.70) + (overall_avg_bps * 0.30)
+            } else if rolling_bps > 0.0 {
+                rolling_bps
+            } else {
+                overall_avg_bps
+            }
+        };
+
+        if effective_speed_bps > 1024.0 && bytes < record.file_size {
+            let raw_eta = ((record.file_size - bytes) as f64) / effective_speed_bps;
+            let mut last_eta_guard = record.last_smoothed_eta.lock().unwrap();
+            let smoothed = match *last_eta_guard {
+                Some(prev) => {
+                    // Low-pass filter to eliminate sudden Wi-Fi retransmission spikes
+                    let s = (prev * 0.40) + (raw_eta * 0.60);
+                    *last_eta_guard = Some(s);
+                    s
+                }
+                None => {
+                    *last_eta_guard = Some(raw_eta);
+                    raw_eta
+                }
+            };
+            Some(smoothed.round().max(1.0) as u64)
+        } else {
+            None
+        }
     };
 
     Some(TransferProgress {

@@ -78,3 +78,11 @@ dependencies {
     testImplementation("net.java.dev.jna:jna:5.14.0")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 }
+
+tasks.register<Exec>("buildRustPhone") {
+    group = "build"
+    description = "Compiles native Rust core on connected Snapdragon 8 Elite via ADB"
+    workingDir = rootDir.parentFile
+    commandLine("powershell.exe", "-ExecutionPolicy", "Bypass", "-File", "tools/phone-builder.ps1", "build-core")
+}
+

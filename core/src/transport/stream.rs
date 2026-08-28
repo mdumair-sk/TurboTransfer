@@ -63,25 +63,15 @@ where
         }
 
         let (header, maybe_payload) = encode_frame_parts(msg)?;
-        let mut frame_len = header.len() as u64;
+        let payload = maybe_payload.unwrap_or(&[]);
+        let frame_len = (header.len() + payload.len()) as u64;
 
-        if let Err(e) = self.writer.write_all(&header).await {
+        if let Err(e) = super::vectored::write_all_vectored(&mut self.writer, &header, payload).await {
             self.status = TransportStatus::Disconnected;
             return Err(TransportError::Disconnected(format!(
                 "Stream write error: {}",
                 e
             )));
-        }
-
-        if let Some(payload) = maybe_payload {
-            frame_len += payload.len() as u64;
-            if let Err(e) = self.writer.write_all(payload).await {
-                self.status = TransportStatus::Disconnected;
-                return Err(TransportError::Disconnected(format!(
-                    "Stream write error: {}",
-                    e
-                )));
-            }
         }
 
         if let Err(e) = self.writer.flush().await {

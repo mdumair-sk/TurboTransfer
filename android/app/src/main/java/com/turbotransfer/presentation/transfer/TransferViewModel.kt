@@ -89,7 +89,30 @@ class TransferViewModel @Inject constructor(
 
         if (progress.status == TransferStatus.COMPLETED) {
             val durationMs = System.currentTimeMillis() - session.startTimeMs
-            val avgSpeed = if (speedSampleCount > 0) speedSum / speedSampleCount else _uiState.value.peakTotalSpeed
+            val avgSpeed = if (progress.aggregateSpeedMBps > 0.01) {
+                progress.aggregateSpeedMBps
+            } else if (speedSampleCount > 0) {
+                speedSum / speedSampleCount
+            } else {
+                _uiState.value.peakTotalSpeed
+            }
+
+            val avgUsbSpeed = if (progress.usbSpeedMBps > 0.01) {
+                progress.usbSpeedMBps
+            } else if (_uiState.value.peakUsbSpeed > 0.0) {
+                avgSpeed * (_uiState.value.peakUsbSpeed / maxOf(0.01, _uiState.value.peakTotalSpeed))
+            } else {
+                0.0
+            }
+
+            val avgWifiSpeed = if (progress.wifiSpeedMBps > 0.01) {
+                progress.wifiSpeedMBps
+            } else if (_uiState.value.peakWifiSpeed > 0.0) {
+                avgSpeed * (_uiState.value.peakWifiSpeed / maxOf(0.01, _uiState.value.peakTotalSpeed))
+            } else {
+                0.0
+            }
+
             val saveDir = getSettingsUseCase.getReceiveDestDir()
             val finalPath = session.filePath.ifBlank { File(saveDir, progress.fileName).absolutePath }
 
@@ -105,8 +128,10 @@ class TransferViewModel @Inject constructor(
                 durationMs = durationMs,
                 avgSpeedMBps = avgSpeed,
                 peakSpeedMBps = _uiState.value.peakTotalSpeed,
-                usbSpeedMBps = _uiState.value.peakUsbSpeed,
-                wifiSpeedMBps = _uiState.value.peakWifiSpeed,
+                usbSpeedMBps = avgUsbSpeed,
+                wifiSpeedMBps = avgWifiSpeed,
+                peakUsbSpeedMBps = _uiState.value.peakUsbSpeed,
+                peakWifiSpeedMBps = _uiState.value.peakWifiSpeed,
                 status = "Completed"
             )
 

@@ -7,11 +7,13 @@ use crate::protocol::{Message, ProtocolError};
 pub mod stream;
 pub mod tcp;
 pub mod usb;
+pub mod vectored;
 pub mod wifi_direct;
 
 pub use stream::StreamTransport;
 pub use tcp::{TcpListenerTransport, TcpTransport};
 pub use usb::{AdbDeviceInfo, UsbTransport, UsbTransportConfig};
+pub use vectored::write_all_vectored;
 pub use wifi_direct::{WifiDirectConfig, WifiDirectTransport};
 
 /// Discriminator for active physical or virtual transport types (§2, §8, §9).

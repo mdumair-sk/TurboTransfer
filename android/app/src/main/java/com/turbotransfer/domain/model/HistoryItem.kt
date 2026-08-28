@@ -12,7 +12,9 @@ data class HistoryItem(
     val durationMs: Long,
     val avgSpeedMBps: Double,
     val peakSpeedMBps: Double,
-    val usbSpeedMBps: Double,
-    val wifiSpeedMBps: Double,
+    val usbSpeedMBps: Double = 0.0, // Average USB speed
+    val wifiSpeedMBps: Double = 0.0, // Average Wi-Fi speed
+    val peakUsbSpeedMBps: Double = 0.0, // Peak USB speed
+    val peakWifiSpeedMBps: Double = 0.0, // Peak Wi-Fi speed
     val status: String // Completed, Failed, Cancelled
 )

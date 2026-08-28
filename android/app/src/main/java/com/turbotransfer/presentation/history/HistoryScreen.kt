@@ -140,12 +140,22 @@ fun HistoryScreen(
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("Size: ${item.formattedSize}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             if (item.avgSpeedMBps > 0.0) {
+                                val channelDetail = if (item.usbSpeedMBps > 0.01 && item.wifiSpeedMBps > 0.01) {
+                                    " (USB: ${String.format("%.1f", item.usbSpeedMBps)} | Wi-Fi: ${String.format("%.1f", item.wifiSpeedMBps)})"
+                                } else if (item.wifiSpeedMBps > 0.01) {
+                                    " (5 GHz Wi-Fi)"
+                                } else if (item.usbSpeedMBps > 0.01) {
+                                    " (USB)"
+                                } else {
+                                    ""
+                                }
                                 Text(
-                                    "Avg Speed: ${String.format("%.2f MB/s", item.avgSpeedMBps)}",
+                                    "Avg: ${String.format("%.2f MB/s", item.avgSpeedMBps)}$channelDetail",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = Color(0xFF2E7D32)

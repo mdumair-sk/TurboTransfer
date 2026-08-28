@@ -1,5 +1,6 @@
 package com.turbotransfer.data.repository
 
+import android.content.Context
 import com.turbotransfer.UriUtils
 import com.turbotransfer.core.common.DispatcherProvider
 import com.turbotransfer.core.common.Resource
@@ -10,6 +11,8 @@ import com.turbotransfer.domain.model.TransferProgressInfo
 import com.turbotransfer.domain.model.TransferSession
 import com.turbotransfer.domain.model.TransferStatus
 import com.turbotransfer.domain.repository.TransferRepository
+import com.turbotransfer.service.TransferService
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +29,7 @@ import javax.inject.Singleton
 
 @Singleton
 class TransferRepositoryImpl @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val rustCoreDataSource: RustCoreDataSource,
     private val settingsLocalDataSource: SettingsLocalDataSource,
     private val transferLockManager: TransferLockManager,
@@ -51,10 +55,14 @@ class TransferRepositoryImpl @Inject constructor(
 
     override fun setActiveSession(session: TransferSession?) {
         _activeSessionFlow.value = session
+        if (session != null) {
+            TransferService.start(context, session.transferId)
+        }
     }
 
     override fun clearActiveSession() {
         _activeSessionFlow.value = null
+        TransferService.stop(context)
     }
 
     override suspend fun startTransfer(filePath: String, address: String?, fileName: String?): Resource<String> {
@@ -78,6 +86,7 @@ class TransferRepositoryImpl @Inject constructor(
                     isOutgoing = true
                 )
                 _activeSessionFlow.value = session
+                TransferService.start(context, transferId)
                 Resource.Success(transferId)
             },
             onFailure = { error ->
@@ -167,7 +176,7 @@ class TransferRepositoryImpl @Inject constructor(
         return if (activeTransfer != null) {
             val resolvedPath = File(saveDir, activeTransfer.fileName).absolutePath
             val isOut = (activeTransfer.role == FfiTransferRole.SENDER)
-            TransferSession(
+            val session = TransferSession(
                 transferId = activeTransfer.transferId,
                 fileName = activeTransfer.fileName,
                 fileSize = activeTransfer.fileSize.toLong(),
@@ -176,6 +185,9 @@ class TransferRepositoryImpl @Inject constructor(
                 isOutgoing = isOut,
                 startTimeMs = System.currentTimeMillis()
             )
+            _activeSessionFlow.value = session
+            TransferService.start(context, activeTransfer.transferId)
+            session
         } else {
             null
         }

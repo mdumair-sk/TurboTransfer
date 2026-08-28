@@ -6,6 +6,7 @@ pub mod scheduler;
 pub mod transfer;
 pub mod transport;
 pub mod uniffi_interface;
+pub mod util;
 
 pub use uniffi_interface::*;
 

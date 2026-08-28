@@ -107,20 +107,19 @@ fun TransferScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Column {
-                                Text("Average Speed", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
+                                Text("Total Average", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
                                 Text(String.format("%.2f MB/s", item.avgSpeedMBps), fontWeight = FontWeight.Bold, color = Color(0xFF81C784), fontSize = 14.sp)
+                                Text("Peak: ${String.format("%.2f", item.peakSpeedMBps)}", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
                             }
                             Column {
-                                Text("Peak Speed", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
-                                Text(String.format("%.2f MB/s", item.peakSpeedMBps), fontWeight = FontWeight.Bold, color = Color(0xFF81C784), fontSize = 14.sp)
-                            }
-                            Column {
-                                Text("USB Peak", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
+                                Text("USB Avg", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
                                 Text(String.format("%.2f MB/s", item.usbSpeedMBps), fontWeight = FontWeight.Bold, color = Color(0xFF64B5F6), fontSize = 14.sp)
+                                Text("Peak: ${String.format("%.2f", item.peakUsbSpeedMBps)}", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
                             }
                             Column {
-                                Text("Wi-Fi Peak", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
+                                Text("5 GHz Wi-Fi Avg", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
                                 Text(String.format("%.2f MB/s", item.wifiSpeedMBps), fontWeight = FontWeight.Bold, color = Color(0xFFBA68C8), fontSize = 14.sp)
+                                Text("Peak: ${String.format("%.2f", item.peakWifiSpeedMBps)}", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
                             }
                         }
 
@@ -207,7 +206,7 @@ fun TransferScreen(
                             }
 
                             Text(
-                                "ETA: ${p.etaSeconds?.let { "${it}s" } ?: "--"}",
+                                "ETA: ${UriUtils.formatEta(p.etaSeconds)}",
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant

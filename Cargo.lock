@@ -1182,6 +1182,7 @@ dependencies = [
  "camino",
  "chrono",
  "crc32c",
+ "libc",
  "log",
  "serde",
  "serde_bytes",

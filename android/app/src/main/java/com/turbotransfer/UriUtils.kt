@@ -30,6 +30,27 @@ object UriUtils {
         }
     }
 
+    fun formatEta(etaSeconds: Long?): String {
+        if (etaSeconds == null || etaSeconds <= 0L) return "--"
+        return when {
+            etaSeconds < 60L -> "${etaSeconds}s"
+            etaSeconds < 3600L -> {
+                val mins = etaSeconds / 60L
+                val secs = etaSeconds % 60L
+                "${mins}m ${secs}s"
+            }
+            else -> {
+                val hours = etaSeconds / 3600L
+                val mins = (etaSeconds % 3600L) / 60L
+                "${hours}h ${mins}m"
+            }
+        }
+    }
+
+    fun formatSpeed(mbps: Double): String {
+        return String.format(java.util.Locale.US, "%.2f MB/s", mbps)
+    }
+
     fun resolveSelectedFile(context: Context, uri: Uri): SelectedFileInfo? {
         try {
             var displayName = "Unknown"
