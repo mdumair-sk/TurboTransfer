@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   # --------------------------------------------------------------------------
-  # 1. Build Ratatui TUI Binaries (Cross-Platform Matrix)
+  # 1. Build Ratatui TUI Binaries (Linux & Windows Matrix)
   # --------------------------------------------------------------------------
   build-tui:
     name: Build TUI (${{ matrix.target }})
@@ -52,18 +52,6 @@ jobs:
             artifact_name: turbotransfer-tui-windows-x86_64.zip
             binary_name: tui
             exe_suffix: ".exe"
-            use_cross: false
-          - os: macos-13
-            target: x86_64-apple-darwin
-            artifact_name: turbotransfer-tui-macos-x86_64.tar.gz
-            binary_name: tui
-            exe_suffix: ""
-            use_cross: false
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact_name: turbotransfer-tui-macos-aarch64.tar.gz
-            binary_name: tui
-            exe_suffix: ""
             use_cross: false
 
     steps:
@@ -120,12 +108,7 @@ jobs:
       - name: Generate Checksum
         shell: bash
         run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            CertUtil -hashfile ${{ matrix.artifact_name }} SHA256 | findstr /v ":" | findstr /v "CertUtil" | tr -d '\r\n ' > ${{ matrix.artifact_name }}.sha256
-            echo "  ${{ matrix.artifact_name }}" >> ${{ matrix.artifact_name }}.sha256
-          else
-            shasum -a 256 ${{ matrix.artifact_name }} > ${{ matrix.artifact_name }}.sha256
-          fi
+          sha256sum "${{ matrix.artifact_name }}" > "${{ matrix.artifact_name }}.sha256"
 
       - name: Upload TUI Artifact
         uses: actions/upload-artifact@v4
@@ -249,7 +232,7 @@ jobs:
 
       - name: Generate Checksum
         run: |
-          shasum -a 256 turbotransfer-android.apk > turbotransfer-android.apk.sha256
+          sha256sum turbotransfer-android.apk > turbotransfer-android.apk.sha256
 
       - name: Upload Android APK Artifact
         uses: actions/upload-artifact@v4
@@ -298,7 +281,7 @@ jobs:
           
           # Generate unified SHA256SUMS.txt
           cd ../release_dist
-          shasum -a 256 * > SHA256SUMS.txt
+          sha256sum * > SHA256SUMS.txt
           
           echo "=== Release Assets Ready ==="
           ls -lh

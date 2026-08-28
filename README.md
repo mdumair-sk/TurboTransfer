@@ -467,8 +467,6 @@ TurboTransfer features a fully automated GitHub Actions CI/CD release pipeline (
 | **Windows TUI** | `x86_64` (MSVC) | `turbotransfer-tui-windows-x86_64.zip` |
 | **Linux TUI** | `x86_64` (GNU) | `turbotransfer-tui-linux-x86_64.tar.gz` |
 | **Linux TUI (ARM)** | `aarch64` (GNU) | `turbotransfer-tui-linux-aarch64.tar.gz` |
-| **macOS TUI (Intel)** | `x86_64` (Darwin) | `turbotransfer-tui-macos-x86_64.tar.gz` |
-| **macOS TUI (Apple Silicon)** | `aarch64` (Darwin) | `turbotransfer-tui-macos-aarch64.tar.gz` |
 
 ### Triggering a Release
 
