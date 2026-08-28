@@ -1,0 +1,314 @@
+name: Release TurboTransfer (TUI + Android APK)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name for the release (e.g. v1.0.0)'
+        required: true
+        default: 'v0.1.0'
+      draft:
+        description: 'Create draft release'
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  # --------------------------------------------------------------------------
+  # 1. Build Ratatui TUI Binaries (Cross-Platform Matrix)
+  # --------------------------------------------------------------------------
+  build-tui:
+    name: Build TUI (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: turbotransfer-tui-linux-x86_64.tar.gz
+            binary_name: tui
+            exe_suffix: ""
+            use_cross: false
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact_name: turbotransfer-tui-linux-aarch64.tar.gz
+            binary_name: tui
+            exe_suffix: ""
+            use_cross: true
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: turbotransfer-tui-windows-x86_64.zip
+            binary_name: tui
+            exe_suffix: ".exe"
+            use_cross: false
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact_name: turbotransfer-tui-macos-x86_64.tar.gz
+            binary_name: tui
+            exe_suffix: ""
+            use_cross: false
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: turbotransfer-tui-macos-aarch64.tar.gz
+            binary_name: tui
+            exe_suffix: ""
+            use_cross: false
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}-tui
+
+      - name: Install Cross Tool (if needed)
+        if: matrix.use_cross == true
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build TUI Release Binary
+        shell: bash
+        run: |
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }} -p turbotransfer-tui
+          else
+            cargo build --release --target ${{ matrix.target }} -p turbotransfer-tui
+          fi
+
+      - name: Package Binary Archive
+        shell: bash
+        run: |
+          TARGET_DIR="target/${{ matrix.target }}/release"
+          BIN_SRC="${TARGET_DIR}/${{ matrix.binary_name }}${{ matrix.exe_suffix }}"
+          ALIAS_SRC="${TARGET_DIR}/turbotransfer-tui${{ matrix.exe_suffix }}"
+          
+          # Create alias copy for convenience
+          cp "$BIN_SRC" "$ALIAS_SRC"
+          
+          mkdir -p package_staging
+          cp "$BIN_SRC" package_staging/
+          cp "$ALIAS_SRC" package_staging/
+          if [ -f "README.md" ]; then cp "README.md" package_staging/; fi
+          if [ -f "LICENSE" ]; then cp "LICENSE" package_staging/; fi
+
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a -tzip "${{ matrix.artifact_name }}" ./package_staging/*
+          else
+            tar -czvf "${{ matrix.artifact_name }}" -C package_staging .
+          fi
+
+      - name: Generate Checksum
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            CertUtil -hashfile ${{ matrix.artifact_name }} SHA256 | findstr /v ":" | findstr /v "CertUtil" | tr -d '\r\n ' > ${{ matrix.artifact_name }}.sha256
+            echo "  ${{ matrix.artifact_name }}" >> ${{ matrix.artifact_name }}.sha256
+          else
+            shasum -a 256 ${{ matrix.artifact_name }} > ${{ matrix.artifact_name }}.sha256
+          fi
+
+      - name: Upload TUI Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            ${{ matrix.artifact_name }}
+            ${{ matrix.artifact_name }}.sha256
+          retention-days: 5
+
+  # --------------------------------------------------------------------------
+  # 2. Build Android Companion App APK
+  # --------------------------------------------------------------------------
+  build-android:
+    name: Build Android APK (Multi-ABI Core + Compose UI)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain for Android ABIs
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android, i686-linux-android
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: android-rust-core
+
+      - name: Install cargo-ndk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
+      - name: Set up Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26b
+          link-to-sdk: true
+
+      - name: Build Native Rust Core Libraries (Multi-ABI)
+        run: |
+          cargo ndk \
+            -t arm64-v8a \
+            -t armeabi-v7a \
+            -t x86_64 \
+            -t x86 \
+            -o android/app/src/main/jniLibs \
+            build --release -p turbotransfer-core
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build Android Release APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Sign & Finalize APK
+        working-directory: android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          BUILD_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          echo "Found built APK: $BUILD_APK"
+          
+          # Find Android SDK build-tools apksigner & zipalign
+          BUILD_TOOLS_DIR=$(find $ANDROID_HOME/build-tools -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          ZIPALIGN="$BUILD_TOOLS_DIR/zipalign"
+          APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
+          
+          echo "Using Android Build-Tools: $BUILD_TOOLS_DIR"
+          
+          # Align APK
+          $ZIPALIGN -v -p 4 "$BUILD_APK" aligned-release.apk
+          
+          # Sign APK
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASS" ] && [ -n "$KEY_ALIAS" ]; then
+            echo "Signing with repository secret release keystore..."
+            echo "$KEYSTORE_BASE64" | base64 -d > release.jks
+            $APKSIGNER sign --ks release.jks \
+              --ks-pass "pass:$KEYSTORE_PASS" \
+              --ks-key-alias "$KEY_ALIAS" \
+              --key-pass "pass:${KEY_PASS:-$KEYSTORE_PASS}" \
+              --out ../turbotransfer-android.apk \
+              aligned-release.apk
+            rm -f release.jks
+          else
+            echo "No custom keystore secrets found. Signing with auto-generated release keystore for instant installability..."
+            keytool -genkey -v -keystore release.jks \
+              -alias turbotransfer \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass turbotransfer \
+              -keypass turbotransfer \
+              -dname "CN=TurboTransfer, OU=TurboTransfer, O=TurboTransfer, L=San Francisco, S=CA, C=US"
+            
+            $APKSIGNER sign --ks release.jks \
+              --ks-pass pass:turbotransfer \
+              --ks-key-alias turbotransfer \
+              --key-pass pass:turbotransfer \
+              --out ../turbotransfer-android.apk \
+              aligned-release.apk
+            rm -f release.jks
+          fi
+          
+          # Verify signature
+          $APKSIGNER verify --verbose ../turbotransfer-android.apk
+
+      - name: Generate Checksum
+        run: |
+          shasum -a 256 turbotransfer-android.apk > turbotransfer-android.apk.sha256
+
+      - name: Upload Android APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: turbotransfer-android.apk
+          path: |
+            turbotransfer-android.apk
+            turbotransfer-android.apk.sha256
+          retention-days: 5
+
+  # --------------------------------------------------------------------------
+  # 3. Publish GitHub Release
+  # --------------------------------------------------------------------------
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-tui, build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Determine Release Tag
+        id: release_tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Target Release Tag: $TAG"
+
+      - name: Download All Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release_assets
+          merge-multiple: true
+
+      - name: Consolidate Checksums & Prepare Release Directory
+        run: |
+          mkdir -p release_dist
+          cd release_assets
+          
+          # Copy archives and apk to dist
+          cp *.tar.gz *.zip *.apk ../release_dist/ 2>/dev/null || true
+          
+          # Generate unified SHA256SUMS.txt
+          cd ../release_dist
+          shasum -a 256 * > SHA256SUMS.txt
+          
+          echo "=== Release Assets Ready ==="
+          ls -lh
+
+      - name: Create GitHub Release & Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_tag.outputs.tag }}
+          name: "TurboTransfer Release ${{ steps.release_tag.outputs.tag }}"
+          draft: ${{ github.event.inputs.draft || false }}
+          prerelease: ${{ github.event.inputs.prerelease || false }}
+          generate_release_notes: true
+          files: release_dist/*

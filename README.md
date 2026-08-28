@@ -455,6 +455,33 @@ cargo test --workspace
 
 ---
 
+## 📦 Automated Releases (GitHub Actions)
+
+TurboTransfer features a fully automated GitHub Actions CI/CD release pipeline ([`.github/workflows/release.yml`](.github/workflows/release.yml)) that builds, packages, signs, and publishes official releases for **TUI** and **Android APK**:
+
+### Released Artifacts
+
+| Target | Architecture | Archive / File |
+|---|---|---|
+| **Android Companion App** | Universal (`arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`) | `turbotransfer-android.apk` (Signed, ready to install) |
+| **Windows TUI** | `x86_64` (MSVC) | `turbotransfer-tui-windows-x86_64.zip` |
+| **Linux TUI** | `x86_64` (GNU) | `turbotransfer-tui-linux-x86_64.tar.gz` |
+| **Linux TUI (ARM)** | `aarch64` (GNU) | `turbotransfer-tui-linux-aarch64.tar.gz` |
+| **macOS TUI (Intel)** | `x86_64` (Darwin) | `turbotransfer-tui-macos-x86_64.tar.gz` |
+| **macOS TUI (Apple Silicon)** | `aarch64` (Darwin) | `turbotransfer-tui-macos-aarch64.tar.gz` |
+
+### Triggering a Release
+
+* **Via Git Tag**:
+  ```bash
+  git tag v1.0.0
+  git push origin v1.0.0
+  ```
+* **Via GitHub Actions UI**:
+  Navigate to **Actions** $\rightarrow$ **Release TurboTransfer (TUI + Android APK)** $\rightarrow$ **Run workflow** $\rightarrow$ Specify tag and release parameters.
+
+---
+
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
