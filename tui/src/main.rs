@@ -22,11 +22,13 @@ fn perform_cleanup() {
     let _ = disable_raw_mode();
     let _ = execute!(stdout(), LeaveAlternateScreen, crossterm::cursor::Show);
     // Stop all core transfer listeners
-    let _ = leave_receive_mode(None);
+    let had_listeners = leave_receive_mode(None);
     // Remove all ADB forward/reverse tunnels to prevent ADB server deadlock
     #[cfg(not(target_os = "android"))]
     {
-        turbotransfer_core::transport::UsbTransport::cleanup_all_default_adb_tunnels(None);
+        if !had_listeners {
+            turbotransfer_core::transport::UsbTransport::cleanup_all_default_adb_tunnels(None);
+        }
     }
 }
 
@@ -103,5 +105,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Clean Terminal Restoration & State Rollback
     perform_cleanup();
-    Ok(())
+    std::process::exit(0);
 }
