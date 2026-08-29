@@ -4,11 +4,11 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Environment
+import android.os.StatFs
 import android.provider.DocumentsContract
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -21,6 +21,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -30,7 +31,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.turbotransfer.presentation.components.HotspotQrDialog
+import com.turbotransfer.presentation.components.*
+import com.turbotransfer.presentation.theme.*
 
 @Composable
 fun ReceiveScreen(
@@ -59,234 +61,160 @@ fun ReceiveScreen(
         }
     }
 
-    // Pulsing radar animation
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.35f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulseScale"
-    )
-
     val isListening = uiState.isListening
     val hotspotState = uiState.hotspotState
+
+    // Calculate free storage space dynamically
+    val (usedStorageBytes, totalStorageBytes) = remember(uiState.destDir) {
+        try {
+            val stat = StatFs(uiState.destDir)
+            val total = stat.totalBytes
+            val free = stat.availableBytes
+            Pair(total - free, total)
+        } catch (e: Exception) {
+            Pair(0L, 0L)
+        }
+    }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(vertical = 16.dp)
+        contentPadding = PaddingValues(top = 16.dp, bottom = 24.dp)
     ) {
+        // 1. Header
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    "Receive Files",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
+                Column {
+                    Text(
+                        "INBOUND BEACON",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp,
+                        color = CyberTextPrimary
+                    )
+                    Text(
+                        "Dual-channel high-speed receiver listener",
+                        fontSize = 11.sp,
+                        color = CyberTextMuted
+                    )
+                }
+                CyberBadge(
+                    text = if (isListening) "LISTENING :9876" else "OFFLINE",
+                    color = if (isListening) CyberMint else CyberTextMuted,
+                    pulsing = isListening
                 )
-                if (hotspotState.isActive && hotspotState.credentials != null) {
-                    IconButton(onClick = { viewModel.setShowQrDialog(true) }) {
-                        Icon(
-                            Icons.Default.QrCode,
-                            contentDescription = "Show Hotspot QR",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
             }
         }
 
-        // 1. Animated Radar Graphic Hub
+        // 2. Cyber Beacon Hero Status Card
         item {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(180.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                if (isListening) {
-                    Box(
-                        modifier = Modifier
-                            .size((130 * pulseScale).dp)
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), CircleShape)
-                    )
-                    Box(
-                        modifier = Modifier
-                            .size((90 * pulseScale).dp)
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.20f), CircleShape)
-                    )
-                }
-
-                Surface(
-                    shape = CircleShape,
-                    color = if (isListening) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.size(80.dp),
-                    shadowElevation = 6.dp,
-                    tonalElevation = 6.dp
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = if (isListening) Icons.Default.DownloadDone else Icons.Default.Download,
-                            contentDescription = null,
-                            tint = if (isListening) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(40.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // 2. Dual-Channel Readiness Badge & Status Card
-        item {
-            Card(
+            CyberCard(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isListening) Color(0xFFE8F5E9) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                ),
-                border = BorderStroke(1.dp, if (isListening) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outlineVariant)
+                borderColor = if (isListening) CyberMint else CyberCardBorder,
+                borderGlow = isListening
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Box(
-                                modifier = Modifier
-                                    .size(10.dp)
-                                    .background(if (isListening) Color(0xFF4CAF50) else Color.Gray, CircleShape)
+                        PulsingRadar(
+                            isScanning = isListening,
+                            modifier = Modifier.size(64.dp),
+                            tint = if (isListening) CyberMint else CyberTextMuted
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                if (isListening) "Receiver Active & Ready" else "Receiver Standby",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 15.sp,
+                                color = CyberTextPrimary
                             )
                             Text(
-                                text = if (isListening) "Ready to Receive" else "Receiver Inactive",
-                                fontWeight = FontWeight.Bold,
-                                color = if (isListening) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant
+                                if (isListening) "Bound to 0.0.0.0:9876" else "Tap 'Start Receive Mode' below",
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = if (isListening) CyberMint else CyberTextMuted
                             )
                         }
-                        Text("Port 9876", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                }
 
-                    // Multi-Channel Badge
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Multi-Channel Antenna Status Grid
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // USB ADB Link Badge
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = when {
-                            uiState.isDualChannelReady -> Color(0xFF1B5E20)
-                            hotspotState.isActive || uiState.detectedIps.isNotEmpty() -> Color(0xFF0D47A1)
-                            uiState.usbAvailable -> Color(0xFFE65100)
-                            else -> MaterialTheme.colorScheme.surface
-                        },
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        color = CyberSurface,
+                        border = BorderStroke(1.dp, if (uiState.usbAvailable) CyberCyan else CyberCardBorder)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Icon(
-                                imageVector = if (uiState.isDualChannelReady) Icons.Default.Bolt else Icons.Default.Sensors,
+                                Icons.Default.Usb,
                                 contentDescription = null,
-                                tint = Color.White,
+                                tint = if (uiState.usbAvailable) CyberCyan else CyberTextMuted,
                                 modifier = Modifier.size(16.dp)
                             )
-                            Text(
-                                text = when {
-                                    uiState.isDualChannelReady -> "⚡ Dual-Channel Multipath Ready (USB + 5 GHz Wi-Fi)"
-                                    hotspotState.isActive -> "📡 5 GHz Local Hotspot Active"
-                                    uiState.detectedIps.isNotEmpty() -> "📡 Wi-Fi Direct / LAN Ready"
-                                    uiState.usbAvailable -> "🔌 USB (ADB Tunnel) Ready"
-                                    else -> "Waiting for USB or Wi-Fi link..."
-                                },
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = if (isListening) "Listening on 0.0.0.0:9876. Senders can transmit over USB, 5 GHz Wi-Fi, or both simultaneously." else "Tap 'Start Receive Mode' below to accept incoming files.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-
-        // 3. 5 GHz Hotspot Card with Direct Toggle & QR Button
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Icon(
-                                Icons.Default.WifiTethering,
-                                contentDescription = null,
-                                tint = if (hotspotState.isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                             Column {
-                                Text("5 GHz Wi-Fi Hotspot", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                Text("USB Link", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CyberTextPrimary)
                                 Text(
-                                    if (hotspotState.isActive) "Active (${hotspotState.credentials?.band ?: "5 GHz"})" else "Disabled",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (hotspotState.isActive) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant
+                                    if (uiState.usbAvailable) "127.0.0.1 (ADB)" else "Standby",
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = if (uiState.usbAvailable) CyberCyan else CyberTextMuted
                                 )
                             }
                         }
-                        Switch(
-                            checked = hotspotState.isActive,
-                            onCheckedChange = { viewModel.toggleHotspot() }
-                        )
                     }
 
-                    if (hotspotState.isActive && hotspotState.credentials != null) {
-                        val info = hotspotState.credentials
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    // 5GHz Wi-Fi / Hotspot Badge
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        color = CyberSurface,
+                        border = BorderStroke(1.dp, if (hotspotState.isActive || uiState.detectedIps.isNotEmpty()) CyberPurple else CyberCardBorder)
+                    ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            Icon(
+                                Icons.Default.Wifi,
+                                contentDescription = null,
+                                tint = if (hotspotState.isActive || uiState.detectedIps.isNotEmpty()) CyberPurple else CyberTextMuted,
+                                modifier = Modifier.size(16.dp)
+                            )
                             Column {
-                                Text("SSID: ${info.ssid}", fontFamily = FontFamily.Monospace, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                Text("Pass: ${info.passphrase}", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            OutlinedButton(
-                                onClick = { viewModel.setShowQrDialog(true) },
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                            ) {
-                                Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("QR Code", fontSize = 11.sp)
+                                Text("5 GHz Wi-Fi", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CyberTextPrimary)
+                                Text(
+                                    if (hotspotState.isActive) "Hotspot 5G" else uiState.primaryIp.ifBlank { "Standby" },
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = if (hotspotState.isActive || uiState.detectedIps.isNotEmpty()) CyberPurple else CyberTextMuted,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
                     }
@@ -294,44 +222,142 @@ fun ReceiveScreen(
             }
         }
 
-        // 4. Quick PC CLI Helper & IP Address Card
+        // 3. 5 GHz Hotspot & Instant QR Code Card
         item {
-            Card(
+            CyberCard(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                borderColor = if (hotspotState.isActive) CyberPurple else CyberCardBorder,
+                borderGlow = hotspotState.isActive
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (hotspotState.isActive) CyberPurple.copy(alpha = 0.15f) else CyberSurfaceVariant,
+                            border = BorderStroke(1.dp, if (hotspotState.isActive) CyberPurple else CyberCardBorder),
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.WifiTethering,
+                                    contentDescription = null,
+                                    tint = if (hotspotState.isActive) CyberPurple else CyberTextSecondary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Column {
+                            Text(
+                                "5 GHz Wi-Fi Direct Hotspot",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = CyberTextPrimary
+                            )
+                            Text(
+                                if (hotspotState.isActive) "Band: ${hotspotState.credentials?.band ?: "5 GHz"} • Active" else "Generate local 5GHz network",
+                                fontSize = 11.sp,
+                                color = if (hotspotState.isActive) CyberMint else CyberTextMuted
+                            )
+                        }
+                    }
+
+                    Switch(
+                        checked = hotspotState.isActive,
+                        onCheckedChange = { viewModel.toggleHotspot() },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.Black,
+                            checkedTrackColor = CyberPurple,
+                            uncheckedThumbColor = CyberTextMuted,
+                            uncheckedTrackColor = CyberSurfaceVariant
+                        )
+                    )
+                }
+
+                if (hotspotState.isActive && hotspotState.credentials != null) {
+                    val info = hotspotState.credentials
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(color = CyberCardBorder.copy(alpha = 0.6f))
+                    Spacer(modifier = Modifier.height(12.dp))
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Send from PC Command", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                        val pcCmd = if (uiState.primaryIp.isNotBlank() && uiState.primaryIp != "127.0.0.1") {
-                            "turbo send <file> --address 127.0.0.1:9876,${uiState.primaryIp}:9876"
-                        } else {
-                            "turbo send <file>"
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("SSID: ${info.ssid}", fontFamily = FontFamily.Monospace, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyberCyan)
+                            Text("Pass: ${info.passphrase}", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = CyberMint)
                         }
-                        IconButton(
-                            onClick = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clip = ClipData.newPlainText("TurboTransfer CLI", pcCmd)
-                                clipboard.setPrimaryClip(clip)
-                                Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.size(28.dp)
+
+                        Button(
+                            onClick = { viewModel.setShowQrDialog(true) },
+                            colors = ButtonDefaults.buttonColors(containerColor = CyberPurple),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                         ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy command", modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Show QR", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         }
                     }
+                }
+            }
+        }
 
+        // 4. Send from PC Terminal Command Card
+        item {
+            CyberCard(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.Terminal, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(18.dp))
+                        Text(
+                            "TRANSMIT FROM PC CLI",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberCyan
+                        )
+                    }
+                    val pcCmd = if (uiState.primaryIp.isNotBlank() && uiState.primaryIp != "127.0.0.1") {
+                        "turbo send <file> --address 127.0.0.1:9876,${uiState.primaryIp}:9876"
+                    } else {
+                        "turbo send <file>"
+                    }
+                    IconButton(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val clip = ClipData.newPlainText("TurboTransfer CLI", pcCmd)
+                            clipboard.setPrimaryClip(clip)
+                            Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy command", tint = CyberCyan, modifier = Modifier.size(16.dp))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = CyberBackground,
+                    border = BorderStroke(1.dp, CyberCardBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Text(
                         text = if (uiState.primaryIp.isNotBlank() && uiState.primaryIp != "127.0.0.1") {
                             "turbo send <file> --address 127.0.0.1:9876,${uiState.primaryIp}:9876"
@@ -340,74 +366,78 @@ fun ReceiveScreen(
                         },
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier
-                            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
-                            .padding(8.dp)
-                            .fillMaxWidth()
+                        color = CyberMint,
+                        modifier = Modifier.padding(10.dp)
                     )
                 }
             }
         }
 
-        // 5. Storage Destination Folder Card
+        // 5. Storage Destination & Capacity Card
         item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-            ) {
+            CyberCard(modifier = Modifier.fillMaxWidth()) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Save Location", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        Text(
+                            "DESTINATION STORAGE",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberTextSecondary
+                        )
                         Text(
                             uiState.destDir,
                             style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = CyberCyan,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
                     OutlinedButton(
                         onClick = { folderPicker.launch(null) },
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.5f)),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                     ) {
-                        Text("Change", fontSize = 12.sp)
+                        Text("Change", fontSize = 11.sp, color = CyberCyan, fontWeight = FontWeight.Bold)
                     }
+                }
+
+                if (totalStorageBytes > 0) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    StorageSpaceGauge(
+                        usedBytes = usedStorageBytes,
+                        totalBytes = totalStorageBytes
+                    )
                 }
             }
         }
 
-        // 6. Active Transfer Preview (if incoming transfer is active)
+        // 6. Active Transfer Preview Banner (if transfer running)
         if (uiState.activeIncomingSession != null) {
             item {
-                Card(
+                CyberCard(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1B382B)),
-                    border = BorderStroke(1.dp, Color(0xFF4CAF50))
+                    borderColor = CyberMint,
+                    borderGlow = true
                 ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("📥 Receiving File...", fontWeight = FontWeight.Bold, color = Color(0xFF81C784), fontSize = 13.sp)
+                            CyberBadge("INCOMING TRANSFER", color = CyberMint, pulsing = true)
+                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 uiState.activeIncomingSession!!.fileName,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White,
+                                color = CyberTextPrimary,
                                 fontSize = 14.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -415,38 +445,46 @@ fun ReceiveScreen(
                         }
                         Button(
                             onClick = onNavigateToTransfer,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                            shape = RoundedCornerShape(8.dp)
+                            colors = ButtonDefaults.buttonColors(containerColor = CyberMint),
+                            shape = RoundedCornerShape(10.dp)
                         ) {
-                            Text("View Monitor", fontSize = 12.sp)
+                            Text("Open Monitor", fontSize = 12.sp, color = Color.Black, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
         }
 
-        // 7. Primary Action Button
+        // 7. Master Toggle Action Button
         item {
             Button(
                 onClick = { viewModel.toggleReceiveMode() },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(54.dp),
+                    .height(54.dp)
+                    .shadow(
+                        10.dp,
+                        RoundedCornerShape(14.dp),
+                        spotColor = if (isListening) CyberRed.copy(alpha = 0.6f) else CyberMint.copy(alpha = 0.6f)
+                    ),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isListening) Color(0xFFD32F2F) else MaterialTheme.colorScheme.primary
+                    containerColor = if (isListening) CyberRed else CyberMint
                 ),
                 shape = RoundedCornerShape(14.dp)
             ) {
                 Icon(
                     imageVector = if (isListening) Icons.Default.Stop else Icons.Default.PlayArrow,
                     contentDescription = null,
-                    modifier = Modifier.size(20.dp)
+                    tint = if (isListening) Color.White else Color.Black,
+                    modifier = Modifier.size(22.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    if (isListening) "Stop Listening" else "Start Receive Mode",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
+                    if (isListening) "STOP RECEIVER BEACON" else "START RECEIVE MODE",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.sp,
+                    color = if (isListening) Color.White else Color.Black
                 )
             }
         }

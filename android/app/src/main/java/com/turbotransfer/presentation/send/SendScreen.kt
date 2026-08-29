@@ -4,6 +4,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,6 +19,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -30,9 +33,8 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.turbotransfer.UriUtils
-import com.turbotransfer.presentation.components.CategoryChip
-import com.turbotransfer.presentation.components.HotspotQrDialog
-import com.turbotransfer.presentation.components.SelectedFileItemChip
+import com.turbotransfer.presentation.components.*
+import com.turbotransfer.presentation.theme.*
 
 @Composable
 fun SendScreen(
@@ -73,15 +75,37 @@ fun SendScreen(
             .fillMaxSize()
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(vertical = 16.dp)
+        contentPadding = PaddingValues(top = 16.dp, bottom = 24.dp)
     ) {
-        // 1. Quick Media Categories Header
+        // 1. Header & Media Categories
         item {
-            Text(
-                "Select Content to Send",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        "DISPATCH HUB",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp,
+                        color = CyberTextPrimary
+                    )
+                    Text(
+                        "Select files or directories to transmit",
+                        fontSize = 11.sp,
+                        color = CyberTextMuted
+                    )
+                }
+                if (uiState.transferQueue.isNotEmpty()) {
+                    CyberBadge(
+                        text = "${uiState.transferQueue.size} QUEUED",
+                        color = CyberCyan,
+                        pulsing = true
+                    )
+                }
+            }
         }
 
         item {
@@ -93,6 +117,7 @@ fun SendScreen(
                     CategoryChip(
                         icon = Icons.Default.Image,
                         label = "Photos",
+                        accentColor = CyberCyan,
                         onClick = { multiDocLauncher.launch(arrayOf("image/*")) }
                     )
                 }
@@ -100,6 +125,7 @@ fun SendScreen(
                     CategoryChip(
                         icon = Icons.Default.Videocam,
                         label = "Videos",
+                        accentColor = CyberPurple,
                         onClick = { multiDocLauncher.launch(arrayOf("video/*")) }
                     )
                 }
@@ -107,6 +133,7 @@ fun SendScreen(
                     CategoryChip(
                         icon = Icons.Default.Audiotrack,
                         label = "Audio",
+                        accentColor = CyberMint,
                         onClick = { multiDocLauncher.launch(arrayOf("audio/*")) }
                     )
                 }
@@ -114,13 +141,15 @@ fun SendScreen(
                     CategoryChip(
                         icon = Icons.Default.InsertDriveFile,
                         label = "Files",
+                        accentColor = CyberOrange,
                         onClick = { multiDocLauncher.launch(arrayOf("*/*")) }
                     )
                 }
                 item {
                     CategoryChip(
                         icon = Icons.Default.Android,
-                        label = "Apps / APKs",
+                        label = "APKs",
+                        accentColor = CyberBlue,
                         onClick = { multiDocLauncher.launch(arrayOf("application/vnd.android.package-archive", "*/*")) }
                     )
                 }
@@ -128,100 +157,103 @@ fun SendScreen(
                     CategoryChip(
                         icon = Icons.Default.Folder,
                         label = "Folder",
+                        accentColor = Color(0xFFFFC107),
                         onClick = { folderLauncher.launch(null) }
                     )
                 }
             }
         }
 
-        // 2. Selection Cart Card
+        // 2. Selection Cart Tray Card
         if (uiState.transferQueue.isNotEmpty()) {
             val totalBytes = uiState.transferQueue.sumOf { it.sizeBytes }
             item {
-                Card(
+                CyberCard(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                    ),
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
+                    borderColor = CyberCyan,
+                    borderGlow = true
                 ) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
                             Text(
-                                "${uiState.transferQueue.size} items selected (${UriUtils.formatFileSize(totalBytes)})",
+                                "SELECTION CART",
                                 fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberCyan
                             )
-                            TextButton(
-                                onClick = { viewModel.clearQueue() },
-                                contentPadding = PaddingValues(horizontal = 8.dp)
-                            ) {
-                                Text("Clear All", color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
-                            }
+                            Text(
+                                "${uiState.transferQueue.size} file(s) • ${UriUtils.formatFileSize(totalBytes)}",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 14.sp,
+                                color = CyberTextPrimary
+                            )
                         }
-
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        TextButton(
+                            onClick = { viewModel.clearQueue() },
+                            contentPadding = PaddingValues(horizontal = 8.dp)
                         ) {
-                            items(uiState.transferQueue) { fileInfo ->
-                                SelectedFileItemChip(
-                                    fileInfo = fileInfo,
-                                    onRemove = { viewModel.removeFileFromQueue(fileInfo) }
-                                )
-                            }
+                            Text("Clear All", color = CyberRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(uiState.transferQueue) { fileInfo ->
+                            SelectedFileItemChip(
+                                fileInfo = fileInfo,
+                                onRemove = { viewModel.removeFileFromQueue(fileInfo) }
+                            )
                         }
                     }
                 }
             }
         } else {
             item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { multiDocLauncher.launch(arrayOf("*/*")) },
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                    ),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                CyberCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { multiDocLauncher.launch(arrayOf("*/*")) }
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(24.dp),
+                            .padding(vertical = 14.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Surface(
                             shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                            modifier = Modifier.size(56.dp)
+                            color = CyberCyan.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.4f)),
+                            modifier = Modifier.size(54.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     Icons.Default.CloudUpload,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(32.dp)
+                                    tint = CyberCyan,
+                                    modifier = Modifier.size(28.dp)
                                 )
                             }
                         }
                         Text(
                             "Tap to Select Files or Folders",
                             fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface
+                            fontSize = 15.sp,
+                            color = CyberTextPrimary
                         )
                         Text(
-                            "Select multiple photos, 4K videos, documents, or entire directories",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            "Ultra-high speed 802.11ac 5 GHz and USB 3.0 dual-channel ready",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberTextMuted,
                             textAlign = TextAlign.Center
                         )
                     }
@@ -229,87 +261,108 @@ fun SendScreen(
             }
         }
 
-        // 3. 5 GHz Wi-Fi Hotspot Quick Link Card
+        // 3. 5 GHz Direct Hotspot Hub Card
         val hotspotState = uiState.hotspotState
         item {
-            Card(
+            CyberCard(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (hotspotState.isActive) Color(0xFF1B382B) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                ),
-                border = BorderStroke(
-                    1.dp,
-                    if (hotspotState.isActive) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outlineVariant
-                )
+                borderColor = if (hotspotState.isActive) CyberMint else CyberCardBorder,
+                borderGlow = hotspotState.isActive
             ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (hotspotState.isActive) CyberMint.copy(alpha = 0.15f) else CyberSurfaceVariant,
+                            border = BorderStroke(1.dp, if (hotspotState.isActive) CyberMint else CyberCardBorder),
+                            modifier = Modifier.size(40.dp)
                         ) {
-                            Icon(
-                                Icons.Default.WifiTethering,
-                                contentDescription = null,
-                                tint = if (hotspotState.isActive) Color(0xFF81C784) else MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Text(
-                                if (hotspotState.isActive) "5 GHz Hotspot (Active)" else "5 GHz Direct Hotspot",
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = if (hotspotState.isActive) Color(0xFF81C784) else MaterialTheme.colorScheme.onSurface
-                            )
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.WifiTethering,
+                                    contentDescription = null,
+                                    tint = if (hotspotState.isActive) CyberMint else CyberTextSecondary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
                         }
-                        if (hotspotState.isActive && hotspotState.credentials != null) {
-                            Text(
-                                "SSID: ${hotspotState.credentials.ssid}",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                color = Color.White.copy(alpha = 0.9f)
-                            )
-                        } else {
-                            Text(
-                                "Direct device-to-device connection without Wi-Fi router",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    "5 GHz Direct Hotspot",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = CyberTextPrimary
+                                )
+                                if (hotspotState.isActive) {
+                                    CyberBadge("ACTIVE", color = CyberMint, pulsing = true)
+                                }
+                            }
+                            if (hotspotState.isActive && hotspotState.credentials != null) {
+                                Text(
+                                    "SSID: ${hotspotState.credentials.ssid}",
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = CyberMint
+                                )
+                            } else {
+                                Text(
+                                    "Direct phone-to-PC link without router",
+                                    fontSize = 11.sp,
+                                    color = CyberTextMuted
+                                )
+                            }
                         }
                     }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (hotspotState.isActive && hotspotState.credentials != null) {
-                            IconButton(onClick = { viewModel.setShowQrDialog(true) }) {
-                                Icon(Icons.Default.QrCode, contentDescription = "QR Code", tint = Color.White)
+                            IconButton(
+                                onClick = { viewModel.setShowQrDialog(true) },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.Default.QrCode, contentDescription = "QR Code", tint = CyberCyan)
                             }
                         }
                         Button(
                             onClick = { viewModel.toggleHotspot() },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (hotspotState.isActive) Color(0xFFD32F2F) else MaterialTheme.colorScheme.primary
+                                containerColor = if (hotspotState.isActive) CyberRed else CyberCyan
                             ),
-                            shape = RoundedCornerShape(10.dp)
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                         ) {
-                            Text(if (hotspotState.isActive) "Stop" else "Start 5GHz", fontSize = 13.sp)
+                            Text(
+                                if (hotspotState.isActive) "Stop" else "Start 5G",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (hotspotState.isActive) Color.White else Color.Black
+                            )
                         }
                     }
                 }
             }
         }
 
-        // 4. Target Receiver Discovery Section
+        // 4. Target Receiver Discovery & Transmit Action Section
         item {
             Text(
-                "Nearby Receiver",
+                "TARGET RECEIVER",
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.sp,
+                color = CyberTextPrimary
             )
         }
 
@@ -322,132 +375,114 @@ fun SendScreen(
 
         item {
             if (discoveredReceiver != null) {
-                Card(
+                CyberCard(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, Color(0xFF4CAF50)),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    borderColor = CyberMint,
+                    borderGlow = true
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            Surface(
+                                shape = CircleShape,
+                                color = CyberMint.copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, CyberMint),
+                                modifier = Modifier.size(44.dp)
                             ) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = Color(0xFF2E7D32).copy(alpha = 0.12f),
-                                    modifier = Modifier.size(44.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            Icons.Default.Computer,
-                                            contentDescription = null,
-                                            tint = Color(0xFF2E7D32),
-                                            modifier = Modifier.size(26.dp)
-                                        )
-                                    }
-                                }
-                                Column {
-                                    Text(
-                                        discoveredReceiver.displayName,
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.bodyLarge
-                                    )
-                                    Text(
-                                        discoveredReceiver.transport,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.Medium
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Computer,
+                                        contentDescription = null,
+                                        tint = CyberMint,
+                                        modifier = Modifier.size(24.dp)
                                     )
                                 }
                             }
-                            Surface(
-                                color = Color(0xFF2E7D32),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
+                            Column {
                                 Text(
-                                    "READY",
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                    color = Color.White,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
+                                    discoveredReceiver.displayName,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 15.sp,
+                                    color = CyberTextPrimary
+                                )
+                                Text(
+                                    discoveredReceiver.transport,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = CyberCyan
                                 )
                             }
                         }
+                        CyberBadge("READY", color = CyberMint, pulsing = true)
+                    }
 
-                        Button(
-                            onClick = {
-                                viewModel.startBatchTransfer(effectiveAddress) {
-                                    onNavigateToTransfer()
-                                }
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Button(
+                        onClick = {
+                            viewModel.startBatchTransfer(effectiveAddress) {
+                                onNavigateToTransfer()
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .shadow(8.dp, RoundedCornerShape(12.dp), spotColor = CyberCyan.copy(alpha = 0.5f)),
+                        enabled = uiState.transferQueue.isNotEmpty(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = CyberCyan,
+                            disabledContainerColor = CyberSurfaceVariant
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.Black)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        val totalBytes = uiState.transferQueue.sumOf { it.sizeBytes }
+                        Text(
+                            if (uiState.transferQueue.isNotEmpty()) {
+                                "TRANSMIT ${uiState.transferQueue.size} ITEM(S) (${UriUtils.formatFileSize(totalBytes)})"
+                            } else {
+                                "SELECT FILES TO TRANSMIT"
                             },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(52.dp),
-                            enabled = uiState.transferQueue.isNotEmpty(),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                if (uiState.transferQueue.isNotEmpty()) {
-                                    val totalBytes = uiState.transferQueue.sumOf { it.sizeBytes }
-                                    "Send ${uiState.transferQueue.size} item(s) (${UriUtils.formatFileSize(totalBytes)})"
-                                } else {
-                                    "Select Files to Send"
-                                },
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp,
+                            color = Color.Black
+                        )
                     }
                 }
             } else {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                    ),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                ) {
+                CyberCard(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
+                            .padding(vertical = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
-                                strokeWidth = 2.5.dp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                "Scanning for PC Receiver...",
-                                fontWeight = FontWeight.SemiBold,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
+                        PulsingRadar(
+                            isScanning = true,
+                            modifier = Modifier.size(80.dp),
+                            tint = CyberCyan
+                        )
+
                         Text(
-                            "Connect USB cable or run receive mode on PC in the same Wi-Fi network",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            "Scanning for PC Receiver...",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = CyberTextPrimary
+                        )
+
+                        Text(
+                            "Connect USB cable (ADB) or run TurboTransfer PC app on same Wi-Fi",
+                            fontSize = 11.sp,
+                            color = CyberTextMuted,
                             textAlign = TextAlign.Center
                         )
 
@@ -461,15 +496,17 @@ fun SendScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(48.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = CyberCyan),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.Black)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 val totalBytes = uiState.transferQueue.sumOf { it.sizeBytes }
                                 Text(
-                                    "Send Now (${UriUtils.formatFileSize(totalBytes)})",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
+                                    "Transmit Now (${UriUtils.formatFileSize(totalBytes)})",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black
                                 )
                             }
                         }
@@ -480,30 +517,42 @@ fun SendScreen(
 
         // 5. Custom Target Address Accordion
         item {
-            TextButton(
-                onClick = { viewModel.toggleCustomAddressField() },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    if (uiState.showCustomAddressField) "Hide Custom Address ▲" else "Custom Target Address ▼",
-                    fontSize = 13.sp
-                )
-            }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    onClick = { viewModel.toggleCustomAddressField() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        if (uiState.showCustomAddressField) "Hide Manual Address Configuration ▲" else "Manual Target IP:Port Override ▼",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberCyan
+                    )
+                }
 
-            if (uiState.showCustomAddressField) {
-                OutlinedTextField(
-                    value = uiState.customAddress,
-                    onValueChange = { viewModel.setCustomAddress(it) },
-                    label = { Text("Target Address (IP:Port or Loopback)") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Ascii,
-                        autoCorrect = false,
-                        capitalization = KeyboardCapitalization.None
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                )
+                if (uiState.showCustomAddressField) {
+                    OutlinedTextField(
+                        value = uiState.customAddress,
+                        onValueChange = { viewModel.setCustomAddress(it) },
+                        label = { Text("Target IP:Port (e.g. 192.168.1.50:9876)", fontSize = 11.sp) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Ascii,
+                            autoCorrect = false,
+                            capitalization = KeyboardCapitalization.None
+                        ),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = CyberCyan,
+                            unfocusedBorderColor = CyberCardBorder,
+                            focusedTextColor = CyberTextPrimary,
+                            unfocusedTextColor = CyberTextPrimary,
+                            focusedContainerColor = CyberSurface,
+                            unfocusedContainerColor = CyberSurface
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
             }
         }
     }
