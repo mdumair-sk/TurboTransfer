@@ -157,10 +157,10 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
         }
     }
 
-    /// Asynchronously reads the next full `Message` frame from the underlying stream.
+    /// Asynchronously reads the next full `Message` frame from the underlying stream along with total frame bytes.
     /// Handles arbitrary byte fragmentation across reads.
     /// Returns `Ok(None)` on clean EOF, or `Err` on truncation or invalid framing.
-    pub async fn read_frame(&mut self) -> Result<Option<Message>, ProtocolError> {
+    pub async fn read_frame_with_length(&mut self) -> Result<Option<(Message, usize)>, ProtocolError> {
         loop {
             if self.buffer.len() >= 4 {
                 let length_prefix =
@@ -180,7 +180,7 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
                 if self.buffer.len() >= total_frame_len {
                     let frame_bytes = self.buffer.split_to(total_frame_len);
                     let msg = decode_frame(&frame_bytes)?;
-                    return Ok(Some(msg));
+                    return Ok(Some((msg, total_frame_len)));
                 }
 
                 // Exact length known -> allocate remaining frame bytes in one single continuous buffer
@@ -201,5 +201,10 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
                 }
             }
         }
+    }
+
+    /// Asynchronously reads the next full `Message` frame from the underlying stream.
+    pub async fn read_frame(&mut self) -> Result<Option<Message>, ProtocolError> {
+        Ok(self.read_frame_with_length().await?.map(|(msg, _)| msg))
     }
 }

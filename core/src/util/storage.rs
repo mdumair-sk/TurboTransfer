@@ -58,8 +58,11 @@ pub fn preallocate_file(file: &File, file_size: u64) -> std::io::Result<()> {
         use std::os::unix::io::AsRawFd;
         let fd = file.as_raw_fd();
         // Advisory: pre-allocate contiguous blocks to avoid fragmentation and random write stalls
-        unsafe {
-            libc::posix_fallocate(fd, 0, file_size as libc::off_t);
+        let ret = unsafe {
+            libc::posix_fallocate(fd, 0, file_size as libc::off_t)
+        };
+        if ret != 0 && ret != libc::EOPNOTSUPP && ret != libc::EINVAL {
+            return Err(std::io::Error::from_raw_os_error(ret));
         }
     }
 

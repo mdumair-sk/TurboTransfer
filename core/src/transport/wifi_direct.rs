@@ -528,15 +528,15 @@ impl Transport for WifiDirectTransport {
             TransportError::Disconnected("Wi-Fi Direct reader is unavailable".into())
         })?;
 
-        match reader.read_frame().await {
-            Ok(Some(msg)) => {
+        match reader.read_frame_with_length().await {
+            Ok(Some((msg, frame_len))) => {
                 // Update heartbeat liveness timestamp
                 {
                     let mut last = self.last_frame_received.lock().await;
                     *last = Instant::now();
                 }
 
-                self.bytes_received.fetch_add(64, Ordering::Relaxed);
+                self.bytes_received.fetch_add(frame_len as u64, Ordering::Relaxed);
                 Ok(Some(msg))
             }
             Ok(None) => {

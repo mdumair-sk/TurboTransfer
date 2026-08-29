@@ -59,9 +59,8 @@ impl RollingWindowTracker {
             return 0.0;
         }
 
-        let elapsed = if self.samples.len() > 1 {
-            let earliest = self.samples.front().unwrap().timestamp;
-            now.duration_since(earliest).as_secs_f64().max(0.001)
+        let elapsed = if let Some(front) = self.samples.front() {
+            now.duration_since(front.timestamp).as_secs_f64().max(0.001)
         } else {
             self.window_duration.as_secs_f64()
         };

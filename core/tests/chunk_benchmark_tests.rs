@@ -1,11 +1,11 @@
-﻿use std::time::Instant;
+use std::time::Instant;
 use turbotransfer_core::scheduler::buffer_pool::BufferPool;
 use turbotransfer_core::scheduler::model::ChannelPerformanceModel;
 use turbotransfer_core::scheduler::tracker::ChannelTracker;
 
 /// Benchmark chunk sizes across memory allocation count and buffer pool reuse efficiency.
-#[test]
-fn test_chunk_size_memory_and_allocation_bench() {
+#[tokio::test]
+async fn test_chunk_size_memory_and_allocation_bench() {
     let sizes = [
         512 * 1024,      // 512 KiB
         1024 * 1024,     // 1 MiB
@@ -16,29 +16,26 @@ fn test_chunk_size_memory_and_allocation_bench() {
 
     let total_file_bytes = 64 * 1024 * 1024; // 64 MB simulation
 
-    println!(\n=== Chunk Size Memory & Recycling Benchmark (64 MB Total) ===);
+    println!("\n=== Chunk Size Memory & Recycling Benchmark (64 MB Total) ===");
     for &chunk_sz in &sizes {
         let total_chunks = (total_file_bytes + chunk_sz - 1) / chunk_sz;
         let pool = BufferPool::new(8, chunk_sz);
 
         let t0 = Instant::now();
-        let mut allocated_count = 0;
         let mut reused_count = 0;
 
         for _ in 0..total_chunks {
-            let buf = pool.acquire();
-            if buf.capacity() >= chunk_sz {
+            let buf = pool.acquire().await;
+            if buf.as_slice().len() <= chunk_sz {
                 reused_count += 1;
-            } else {
-                allocated_count += 1;
             }
-            pool.release(buf);
+            drop(buf);
         }
         let elapsed_us = t0.elapsed().as_micros();
 
         let reuse_ratio = (reused_count as f64) / (total_chunks as f64) * 100.0;
         println!(
-            Chunk Size: {:>7} bytes ({:.1} MB) | Total Chunks: {:>4} | Acquire/Release: {:>4} us | Reuse Ratio: {:.1}%,
+            "Chunk Size: {:>7} bytes ({:.1} MB) | Total Chunks: {:>4} | Acquire/Release: {:>4} us | Reuse Ratio: {:.1}%",
             chunk_sz,
             (chunk_sz as f64) / (1024.0 * 1024.0),
             total_chunks,
@@ -46,7 +43,7 @@ fn test_chunk_size_memory_and_allocation_bench() {
             reuse_ratio
         );
 
-        assert_eq!(reuse_ratio, 100.0, Buffer pool should achieve 100% reuse after warm up);
+        assert_eq!(reuse_ratio, 100.0, "Buffer pool should achieve 100% reuse after warm up");
     }
 }
 
@@ -60,19 +57,19 @@ fn test_multichannel_config_bench() {
         model: ChannelPerformanceModel,
     }
 
-    let configs = [
-        (USB Only, vec![(USB, 45.0)]),
-        (Wi-Fi 1-Stream, vec![(WiFi-1, 18.0)]),
-        (Wi-Fi 2-Stream Bonded, vec![(WiFi-1, 18.0), (WiFi-2, 18.0)]),
-        (Wi-Fi 4-Stream Bonded, vec![(WiFi-1, 18.0), (WiFi-2, 18.0), (WiFi-3, 18.0), (WiFi-4, 18.0)]),
-        (USB + 4x Wi-Fi Hybrid, vec![(USB, 45.0), (WiFi-1, 18.0), (WiFi-2, 18.0), (WiFi-3, 18.0), (WiFi-4, 18.0)]),
+    let configs: [(&str, Vec<(&str, f64)>); 5] = [
+        ("USB Only", vec![("USB", 45.0)]),
+        ("Wi-Fi 1-Stream", vec![("WiFi-1", 18.0)]),
+        ("Wi-Fi 2-Stream Bonded", vec![("WiFi-1", 18.0), ("WiFi-2", 18.0)]),
+        ("Wi-Fi 4-Stream Bonded", vec![("WiFi-1", 18.0), ("WiFi-2", 18.0), ("WiFi-3", 18.0), ("WiFi-4", 18.0)]),
+        ("USB + 4x Wi-Fi Hybrid", vec![("USB", 45.0), ("WiFi-1", 18.0), ("WiFi-2", 18.0), ("WiFi-3", 18.0), ("WiFi-4", 18.0)]),
     ];
 
     let chunk_size = 2 * 1024 * 1024; // 2 MB
     let total_file_bytes = 100 * 1024 * 1024; // 100 MB
     let total_chunks = total_file_bytes / chunk_size;
 
-    println!(\n=== Multi-Channel Configuration Benchmark (100 MB Transfer) ===);
+    println!("\n=== Multi-Channel Configuration Benchmark (100 MB Transfer) ===");
 
     for (cfg_name, channels_def) in &configs {
         let mut channels: Vec<ChannelSim> = channels_def
@@ -123,7 +120,7 @@ fn test_multichannel_config_bench() {
 
         let aggregate_mbps = (total_file_bytes as f64 / (1024.0 * 1024.0)) / (sim_time_ms / 1000.0);
         println!(
-            Config: {:<22} | Channels: {} | Simulated Rate: {:>6.2} MB/s,
+            "Config: {:<22} | Channels: {} | Simulated Rate: {:>6.2} MB/s",
             cfg_name,
             channels.len(),
             aggregate_mbps

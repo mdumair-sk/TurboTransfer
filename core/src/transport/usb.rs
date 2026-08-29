@@ -735,9 +735,9 @@ impl Transport for UsbTransport {
             TransportError::Disconnected("USB transport reader is unavailable".into())
         })?;
 
-        match reader.read_frame().await {
-            Ok(Some(msg)) => {
-                self.bytes_received.fetch_add(64, Ordering::Relaxed);
+        match reader.read_frame_with_length().await {
+            Ok(Some((msg, frame_len))) => {
+                self.bytes_received.fetch_add(frame_len as u64, Ordering::Relaxed);
                 Ok(Some(msg))
             }
             Ok(None) => {

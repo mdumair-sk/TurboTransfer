@@ -190,10 +190,13 @@ impl Message {
             MSG_TYPE_CHUNK_ACK => {
                 let data: ChunkAckData = if payload.len() == 20 {
                     // Legacy 20-byte payload: transfer_id (16) + chunk_id (4)
-                    let t_id = bincode::deserialize(&payload[0..16])
+                    let t_id = Uuid::from_slice(&payload[0..16])
                         .map_err(|e| ProtocolError::DeserializationError(e.to_string()))?;
-                    let c_id = bincode::deserialize(&payload[16..20])
-                        .map_err(|e| ProtocolError::DeserializationError(e.to_string()))?;
+                    let c_id = u32::from_le_bytes(
+                        payload[16..20]
+                            .try_into()
+                            .map_err(|e| ProtocolError::DeserializationError(format!("{}", e)))?,
+                    );
                     ChunkAckData {
                         transfer_id: t_id,
                         chunk_id: c_id,

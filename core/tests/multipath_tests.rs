@@ -97,6 +97,8 @@ async fn test_multipath_single_transport_loss_no_pause() {
         max_in_flight_per_transport: 2,
         buffer_count: 8,
         chunk_size,
+        enable_dynamic_scheduler: false,
+        enable_dynamic_window: false,
     };
 
     let scheduler = MultipathScheduler::new(
@@ -128,6 +130,7 @@ async fn test_multipath_single_transport_loss_no_pause() {
         let ack = ChunkAckData {
             transfer_id,
             chunk_id: cid,
+            receiver_verify_us: None,
         };
         scheduler.handle_chunk_ack(&ack, TransportKind::Usb, 1024 * 1024).await;
     }
@@ -212,6 +215,7 @@ async fn test_multipath_chunk_nack_requeues_and_retries() {
     let ack = ChunkAckData {
         transfer_id,
         chunk_id: 0,
+        receiver_verify_us: None,
     };
     scheduler.handle_chunk_ack(&ack, TransportKind::Usb, chunk_size as u64).await;
     assert_eq!(scheduler.completed_chunks(), 1);
@@ -242,6 +246,7 @@ async fn test_multipath_idempotent_duplicate_chunk_ack() {
     let ack = ChunkAckData {
         transfer_id,
         chunk_id: 0,
+        receiver_verify_us: None,
     };
 
     // First ACK records completion

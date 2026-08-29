@@ -145,10 +145,9 @@ impl Transport for TcpTransport {
             ));
         }
 
-        match self.reader.read_frame().await {
-            Ok(Some(msg)) => {
-                // Approximate received size (rough estimate based on serialized frame)
-                self.bytes_received.fetch_add(64, Ordering::Relaxed);
+        match self.reader.read_frame_with_length().await {
+            Ok(Some((msg, frame_len))) => {
+                self.bytes_received.fetch_add(frame_len as u64, Ordering::Relaxed);
                 Ok(Some(msg))
             }
             Ok(None) => {

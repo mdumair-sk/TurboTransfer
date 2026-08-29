@@ -1195,31 +1195,38 @@ pub async fn send_file_session_multipath(
     }
 
     // 3. Complete transfer on the first surviving transport
+    let mut primary_transport = returned_transports.into_iter().next().ok_or_else(|| {
+        telemetry.mark_failed("No surviving transport available to send Complete message");
+        let data_dir = default_data_dir();
+        export_and_clean_telemetry(transfer_id, &data_dir);
+        TransferSessionError::Transport(TransportError::Disconnected(
+            "All multipath transports disconnected before completion finalization could be sent".into(),
+        ))
+    })?;
+
     let t_fin0 = std::time::Instant::now();
-    if let Some(mut primary_transport) = returned_transports.into_iter().next() {
-        let file_checksum = match running_crc_rx.await {
-            Ok(c) => c,
-            Err(_) => compute_file_crc32c(file_path)?,
-        };
-        let complete_msg = Message::Complete(CompleteData {
-            transfer_id,
-            file_checksum,
-        });
-        primary_transport.send_frame(&complete_msg).await?;
-        loop {
-            let final_frame = primary_transport
-                .receive_frame()
-                .await?
-                .ok_or_else(|| TransferSessionError::UnexpectedMessage("EOF waiting for completion ACK".into()))?;
-            match final_frame {
-                Message::ChunkAck(ack) if ack.chunk_id == u32::MAX => break,
-                Message::ChunkAck(_) | Message::BatchChunkAck(_) => continue,
-                other => {
-                    return Err(TransferSessionError::UnexpectedMessage(format!(
-                        "Expected final Ack, got {:?}",
-                        other
-                    )));
-                }
+    let file_checksum = match running_crc_rx.await {
+        Ok(c) => c,
+        Err(_) => compute_file_crc32c(file_path)?,
+    };
+    let complete_msg = Message::Complete(CompleteData {
+        transfer_id,
+        file_checksum,
+    });
+    primary_transport.send_frame(&complete_msg).await?;
+    loop {
+        let final_frame = primary_transport
+            .receive_frame()
+            .await?
+            .ok_or_else(|| TransferSessionError::UnexpectedMessage("EOF waiting for completion ACK".into()))?;
+        match final_frame {
+            Message::ChunkAck(ack) if ack.chunk_id == u32::MAX => break,
+            Message::ChunkAck(_) | Message::BatchChunkAck(_) => continue,
+            other => {
+                return Err(TransferSessionError::UnexpectedMessage(format!(
+                    "Expected final Ack, got {:?}",
+                    other
+                )));
             }
         }
     }

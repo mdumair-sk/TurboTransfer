@@ -81,7 +81,7 @@ fn test_roundtrip_all_message_types() {
 fn test_legacy_chunk_ack_wire_compatibility() {
     let t_id = Uuid::new_v4();
     // Simulate legacy 20-byte payload: transfer_id (16) + chunk_id (4) without Option<u32>
-    let mut legacy_payload = bincode::serialize(&t_id).unwrap();
+    let mut legacy_payload = t_id.as_bytes().to_vec();
     legacy_payload.extend_from_slice(&5u32.to_le_bytes());
     assert_eq!(legacy_payload.len(), 20);
 

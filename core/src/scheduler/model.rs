@@ -1,4 +1,4 @@
-﻿//! Channel performance modeling, sample-aware EWMAs, variance tracking, and completion time prediction.
+//! Channel performance modeling, sample-aware EWMAs, variance tracking, and completion time prediction.
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -110,8 +110,8 @@ impl ChannelPerformanceModel {
         }
 
         // 5. Complete pending prediction if present
-        if let Some((pred_us, start_time)) = self.pending_predictions.remove(&sample.chunk_id) {
-            let actual_us = start_time.elapsed().as_micros() as u64;
+        if let Some((pred_us, _start_time)) = self.pending_predictions.remove(&sample.chunk_id) {
+            let actual_us = sample.ack_turnaround_us;
             let error_us = if actual_us > pred_us { actual_us - pred_us } else { pred_us - actual_us };
             let error_pct = if pred_us > 0 { (error_us as f64) / (pred_us as f64) * 100.0 } else { 0.0 };
 

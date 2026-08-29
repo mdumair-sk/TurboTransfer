@@ -10,7 +10,7 @@ use log::debug;
 use super::session::{send_file_session, send_file_session_multipath, TransferSessionError};
 use super::tracker::{ChunkTracker, InMemoryChunkTracker};
 use crate::checksum::{compute_file_crc32c, compute_xxhash64};
-use crate::manifest::{MetaActor, MetaActorHandle, TransferRole, TransferStatus};
+use crate::manifest::{MetaActor, MetaActorHandle, TransferMeta, TransferRole, TransferStatus};
 use crate::protocol::{
     ChunkAckData, ChunkNackData, HelloData, Message, TransferAcceptData,
 };
@@ -246,6 +246,15 @@ pub fn register_active_transfer(
     );
 }
 
+/// Updates the MetaActor handle of an active transfer.
+pub fn set_transfer_actor_handle(transfer_id: Uuid, handle: MetaActorHandle) {
+    let registry = get_registry();
+    let mut map = registry.transfers.lock().unwrap();
+    if let Some(record) = map.get_mut(&transfer_id) {
+        record.actor_handle = Some(handle);
+    }
+}
+
 /// Default loopback TCP address for Milestone 5 / 6 transfers.
 pub const DEFAULT_LOOPBACK_ADDR: &str = "127.0.0.1:9876";
 
@@ -276,9 +285,6 @@ pub async fn start_transfer(
     let transfer_id = Uuid::new_v4();
     let chunk_size = 2 * 1024 * 1024; // 2 MiB chunks for optimal pipeline flow and wire-speed Wi-Fi throughput
 
-    // Stop local receive listener to ensure port 9876 is free for outgoing USB/ADB tunnel
-    leave_receive_mode(None);
-
     let file_name = custom_file_name.clone().unwrap_or_else(|| {
         let resolved_path = std::fs::read_link(&file_path).unwrap_or_else(|_| file_path.clone());
         resolved_path
@@ -308,6 +314,21 @@ pub async fn start_transfer(
             TransportPreference::Automatic => "Connecting...".to_string(),
         },
     );
+
+    // Create initial TransferMeta and spawn MetaActor so resumable meta.json exists on disk immediately
+    let initial_meta = TransferMeta::new(
+        transfer_id,
+        Uuid::new_v4(),
+        file_name.clone(),
+        file_size,
+        chunk_size,
+        total_chunks,
+        TransferRole::Sender,
+        _target_device_id,
+    );
+    let meta_path = default_data_dir().join(format!("{}.meta.json", transfer_id));
+    let (actor_handle, _actor_join) = MetaActor::spawn(meta_path, initial_meta, 100);
+    set_transfer_actor_handle(transfer_id, actor_handle);
 
     let addr_default = DEFAULT_LOOPBACK_ADDR.to_string();
     let addr = address.as_deref().unwrap_or(&addr_default);
@@ -901,11 +922,21 @@ async fn handle_incoming_receive_transport(
                 }
             });
 
+            let tracker = if let Some((_, meta)) = find_resumable_transfer(Some(offer.transfer_id)) {
+                if !meta.completed_ranges.is_empty() {
+                    InMemoryChunkTracker::from_ranges(offer.transfer_id, offer.file_id, &meta.completed_ranges)
+                } else {
+                    InMemoryChunkTracker::new()
+                }
+            } else {
+                InMemoryChunkTracker::new()
+            };
+
             let new_session = Arc::new(ActiveReceiveSession {
                 file_path: final_path,
                 part_path,
                 disk_tx,
-                tracker: Arc::new(parking_lot::Mutex::new(InMemoryChunkTracker::new())),
+                tracker: Arc::new(parking_lot::Mutex::new(tracker)),
                 chunk_crcs: Arc::new(parking_lot::Mutex::new(HashMap::new())),
                 total_chunks: offer.total_chunks,
                 bytes_recv_total: Arc::new(AtomicU64::new(0)),
@@ -920,9 +951,10 @@ async fn handle_incoming_receive_transport(
     };
 
     // 4. Send TransferAccept
+    let resume_from = session.tracker.lock().get_completed_ranges();
     let accept = Message::TransferAccept(TransferAcceptData {
         transfer_id: offer.transfer_id,
-        resume_from: None,
+        resume_from,
     });
     transport.send_frame(&accept).await?;
 
@@ -1155,9 +1187,13 @@ async fn handle_incoming_receive_transport(
         }
     }
 
-    // Fix B4: If transfer failed or cancelled, clean up the active receive session to release disk writer and file handle
-    if let Some(status) = transfer_control_status(offer.transfer_id) {
-        if status == TransferStatus::Failed || status == TransferStatus::Cancelled {
+    // Clean up active receive session if transfer is not completed and this was the last active transport channel
+    if !session.is_completed.load(Ordering::SeqCst) {
+        let should_cleanup = {
+            let map = get_active_receive_sessions().lock().unwrap();
+            map.get(&offer.transfer_id).map_or(true, |s| Arc::strong_count(s) <= 2)
+        };
+        if should_cleanup {
             let session_opt = {
                 let mut map = get_active_receive_sessions().lock().unwrap();
                 map.remove(&offer.transfer_id)
@@ -1165,6 +1201,10 @@ async fn handle_incoming_receive_transport(
             if let Some(s) = session_opt {
                 let (reply_tx, _) = tokio::sync::oneshot::channel();
                 let _ = s.disk_tx.send(DiskWriteCmd::Close(reply_tx)).await;
+            }
+            let current_status = transfer_control_status(offer.transfer_id);
+            if current_status != Some(TransferStatus::Paused) && current_status != Some(TransferStatus::Cancelled) && current_status != Some(TransferStatus::Completed) {
+                set_transfer_status(offer.transfer_id, TransferStatus::Failed, Some("Transport connection closed unexpectedly".to_string()));
             }
         }
     }
@@ -1262,7 +1302,7 @@ pub fn find_resumable_transfer(target_id: Option<Uuid>) -> Option<(PathBuf, crat
     let dir = default_data_dir();
     let entries = std::fs::read_dir(dir).ok()?;
 
-    let mut candidate: Option<(PathBuf, crate::manifest::TransferMeta)> = None;
+    let mut candidate: Option<(PathBuf, crate::manifest::TransferMeta, String)> = None;
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -1277,14 +1317,21 @@ pub fn find_resumable_transfer(target_id: Option<Uuid>) -> Option<(PathBuf, crat
                         }
                     } else if meta.status != TransferStatus::Completed {
                         // Pick most recent incomplete transfer
-                        candidate = Some((path, meta));
+                        let updated = meta.updated_at.clone();
+                        let is_newer = match &candidate {
+                            Some((_, _, prev_updated)) => updated > *prev_updated,
+                            None => true,
+                        };
+                        if is_newer {
+                            candidate = Some((path, meta, updated));
+                        }
                     }
                 }
             }
         }
     }
 
-    candidate
+    candidate.map(|(path, meta, _)| (path, meta))
 }
 
 /// Resumes a paused or interrupted transfer from its persisted `meta.json` (§7, §14).
@@ -1303,7 +1350,7 @@ pub async fn resume_transfer(
     let total_chunks = meta.total_chunks;
 
     // Start MetaActor loading from existing meta_path
-    let (_actor_handle, _join) = MetaActor::spawn(meta_path, meta.clone(), 100);
+    let (actor_handle, _join) = MetaActor::spawn(meta_path, meta.clone(), 100);
 
     // Register active transfer
     register_active_transfer(
@@ -1314,6 +1361,7 @@ pub async fn resume_transfer(
         total_chunks,
         "Resumed Transfer".to_string(),
     );
+    set_transfer_actor_handle(tid, actor_handle);
 
     let addr = address.as_deref().unwrap_or(DEFAULT_LOOPBACK_ADDR);
     let transport: Box<dyn Transport> = match transport_pref {
