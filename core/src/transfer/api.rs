@@ -991,6 +991,7 @@ async fn handle_incoming_receive_transport(
                     let ack = Message::ChunkAck(ChunkAckData {
                         transfer_id: chunk_data.transfer_id,
                         chunk_id: chunk_data.chunk_id,
+                        receiver_verify_us: Some(verify_us as u32),
                     });
                     transport.send_frame(&ack).await?;
                     continue;
@@ -1024,6 +1025,7 @@ async fn handle_incoming_receive_transport(
                 let ack = Message::ChunkAck(ChunkAckData {
                     transfer_id: chunk_data.transfer_id,
                     chunk_id: chunk_data.chunk_id,
+                    receiver_verify_us: Some(verify_us as u32),
                 });
                 transport.send_frame(&ack).await?;
 
@@ -1102,6 +1104,7 @@ async fn handle_incoming_receive_transport(
                 let ack = Message::ChunkAck(ChunkAckData {
                     transfer_id: complete_data.transfer_id,
                     chunk_id: u32::MAX,
+                    receiver_verify_us: None,
                 });
                 transport.send_frame(&ack).await?;
                 break;
@@ -1112,6 +1115,7 @@ async fn handle_incoming_receive_transport(
                 let ack = Message::ChunkAck(ChunkAckData {
                     transfer_id: pause_data.transfer_id,
                     chunk_id: u32::MAX - 1,
+                    receiver_verify_us: None,
                 });
                 transport.send_frame(&ack).await?;
             }
@@ -1121,6 +1125,7 @@ async fn handle_incoming_receive_transport(
                 let ack = Message::ChunkAck(ChunkAckData {
                     transfer_id: resume_data.transfer_id,
                     chunk_id: u32::MAX - 2,
+                    receiver_verify_us: None,
                 });
                 transport.send_frame(&ack).await?;
             }
@@ -1425,6 +1430,11 @@ pub fn get_progress(transfer_id: Uuid) -> Option<TransferProgress> {
             *rolling_usb = if *rolling_usb == 0.0 { inst_usb_bps } else { *rolling_usb * 0.70 + inst_usb_bps * 0.30 };
             *rolling_wifi = if *rolling_wifi == 0.0 { inst_wifi_bps } else { *rolling_wifi * 0.70 + inst_wifi_bps * 0.30 };
 
+            let rolling_mbps = *rolling / (1024.0 * 1024.0);
+            if let Some(telemetry) = crate::util::telemetry::get_telemetry(transfer_id) {
+                telemetry.update_peak_throughput(rolling_mbps);
+            }
+
             *last_time = now;
             *last_bytes = bytes;
             *last_usb_bytes = usb_bytes;
@@ -1437,6 +1447,10 @@ pub fn get_progress(transfer_id: Uuid) -> Option<TransferProgress> {
         let end_instant = *end_time.get_or_insert(now);
         let elapsed = end_instant.duration_since(record.start_time).as_secs_f64().max(0.05);
         let avg = (bytes as f64) / elapsed;
+        let avg_mbps = avg / (1024.0 * 1024.0);
+        if let Some(telemetry) = crate::util::telemetry::get_telemetry(transfer_id) {
+            telemetry.update_peak_throughput(avg_mbps);
+        }
         if (usb_bytes > 0 || wifi_bytes > 0) && elapsed > 0.05 {
             (
                 avg,

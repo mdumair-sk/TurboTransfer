@@ -363,3 +363,55 @@ async fn test_duplicate_chunk_crc_table_retention() {
     let out_path = r_res.unwrap().expect("Receiver session should succeed without CRC mismatch");
     assert_eq!(compute_file_crc32c(&out_path).unwrap(), compute_crc32c(&data));
 }
+
+/// Test 7: Verify telemetry peak speed, channel throughput breakdown, and accurate bottleneck reporting.
+#[test]
+fn test_telemetry_peak_speed_and_bottleneck_accuracy() {
+    let tid = Uuid::new_v4();
+    let file_size = 100 * 1024 * 1024; // 100 MB
+    let tel = turbotransfer_core::util::telemetry::TransferTelemetry::new(
+        tid,
+        "test_file.bin".to_string(),
+        file_size,
+        turbotransfer_core::manifest::TransferRole::Sender,
+    );
+
+    // Simulate sending 50 chunks of 2MB over USB and Wi-Fi
+    for cid in 0..50 {
+        let channel = if cid % 2 == 0 { "USB" } else { "WiFi-Stream-1" };
+        tel.record_chunk_read(cid, 2 * 1024 * 1024, 2500, 1500);
+        tel.record_chunk_sent(channel, cid, 2 * 1024 * 1024, 500);
+        tel.record_chunk_ack(channel, cid, 15.0, 2 * 1024 * 1024);
+    }
+
+    tel.mark_completed();
+
+    let report = tel.generate_bottleneck_report();
+    assert!(report.avg_throughput_mbps > 0.0, "Average throughput must be positive");
+    assert!(report.peak_throughput_mbps >= report.avg_throughput_mbps, "Peak throughput must be >= average throughput");
+    assert_eq!(report.channels.len(), 2, "Must have 2 active channels");
+
+    for ch in &report.channels {
+        assert!(ch.bytes_transferred > 0);
+        assert!(ch.throughput_mbps > 0.0, "Channel throughput must be > 0 MB/s");
+        assert_eq!(ch.nack_count, 0);
+        assert_eq!(ch.disconnect_count, 0);
+    }
+
+    // Zero packet loss & fast wire speed => BALANCED_WIRE_SPEED or NETWORK_BANDWIDTH_LIMIT (never NETWORK_LATENCY_JITTER)
+    assert_ne!(
+        report.primary_bottleneck,
+        "NETWORK_LATENCY_JITTER",
+        "Zero NACKs must never be diagnosed as NETWORK_LATENCY_JITTER"
+    );
+
+    let temp_dir = tempdir().unwrap();
+    let (_, log_path) = tel.export_log_files(temp_dir.path()).expect("Log export must succeed");
+    let log_content = std::fs::read_to_string(log_path).expect("Log file must exist");
+
+    assert!(log_content.contains("Peak Speed"), "Log must contain Peak Speed");
+    assert!(log_content.contains("MB/s"), "Log must contain MB/s throughput values");
+    assert!(log_content.contains("Sender Disk Read"), "Sender log must contain Sender Disk Read");
+    assert!(log_content.contains("N/A (Sender Role Session)"), "Sender log must mark Receiver Disk Write as N/A");
+}
+

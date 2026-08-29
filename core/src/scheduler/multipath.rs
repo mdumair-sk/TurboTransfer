@@ -28,6 +28,8 @@ pub struct SchedulerConfig {
     pub max_in_flight_per_transport: usize,
     pub buffer_count: usize,
     pub chunk_size: usize,
+    pub enable_dynamic_scheduler: bool,
+    pub enable_dynamic_window: bool,
 }
 
 impl Default for SchedulerConfig {
@@ -36,9 +38,32 @@ impl Default for SchedulerConfig {
             max_in_flight_per_transport: DEFAULT_MAX_IN_FLIGHT_PER_TRANSPORT,
             buffer_count: DEFAULT_BUFFER_COUNT,
             chunk_size: 64 * 1024 * 1024, // 64 MiB default
+            enable_dynamic_scheduler: false,
+            enable_dynamic_window: false,
         }
     }
 }
+
+/// Candidate evaluation snapshot for explainable scheduler decisions.
+#[derive(Debug, Clone)]
+pub struct CandidateEval {
+    pub channel_name: String,
+    pub ewma_throughput_mbps: f64,
+    pub in_flight_bytes: u64,
+    pub estimated_completion_us: u64,
+    pub max_window: usize,
+    pub current_in_flight: usize,
+}
+
+/// Decision event explaining why a particular channel was chosen.
+#[derive(Debug, Clone)]
+pub struct SchedulerDecision {
+    pub chunk_id: u32,
+    pub selected_channel: String,
+    pub candidates: Vec<CandidateEval>,
+    pub reason: String,
+}
+
 
 /// Dynamic rate-adaptive multipath chunk scheduler (§10).
 pub struct MultipathScheduler {

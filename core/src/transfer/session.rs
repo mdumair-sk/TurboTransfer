@@ -84,10 +84,11 @@ fn handle_ack_frame(
     match frame {
         Message::ChunkAck(ack) => {
             in_flight.remove(&ack.chunk_id);
+            let bytes_len = plan_map.get(&ack.chunk_id).map_or(0, |e| e.payload_length as u64);
             if let Some(t_disp) = in_flight_times.remove(&ack.chunk_id) {
                 let rtt_ms = t_disp.elapsed().as_secs_f64() * 1000.0;
                 if let Some(tel) = telemetry {
-                    tel.record_chunk_ack(channel_name, ack.chunk_id, rtt_ms);
+                    tel.record_chunk_ack(channel_name, ack.chunk_id, rtt_ms, bytes_len);
                 }
             }
             if completed_set.insert(ack.chunk_id) {
@@ -106,10 +107,11 @@ fn handle_ack_frame(
         Message::BatchChunkAck(batch) => {
             for cid in batch.chunk_ids {
                 in_flight.remove(&cid);
+                let bytes_len = plan_map.get(&cid).map_or(0, |e| e.payload_length as u64);
                 if let Some(t_disp) = in_flight_times.remove(&cid) {
                     let rtt_ms = t_disp.elapsed().as_secs_f64() * 1000.0;
                     if let Some(tel) = telemetry {
-                        tel.record_chunk_ack(channel_name, cid, rtt_ms);
+                        tel.record_chunk_ack(channel_name, cid, rtt_ms, bytes_len);
                     }
                 }
                 if completed_set.insert(cid) {
@@ -629,10 +631,11 @@ async fn handle_multipath_ack_frame(
     match frame {
         Message::ChunkAck(ack) => {
             worker_in_flight.remove(&ack.chunk_id);
+            let bytes_len = plan_map.get(&ack.chunk_id).map_or(0, |e| e.payload_length as u64);
             if let Some(t_disp) = worker_in_flight_times.remove(&ack.chunk_id) {
                 let rtt_ms = t_disp.elapsed().as_secs_f64() * 1000.0;
                 if let Some(tel) = telemetry {
-                    tel.record_chunk_ack(channel_name, ack.chunk_id, rtt_ms);
+                    tel.record_chunk_ack(channel_name, ack.chunk_id, rtt_ms, bytes_len);
                 }
             }
             let is_new = completed.lock().insert(ack.chunk_id);
@@ -649,10 +652,11 @@ async fn handle_multipath_ack_frame(
         Message::BatchChunkAck(batch) => {
             for cid in batch.chunk_ids {
                 worker_in_flight.remove(&cid);
+                let bytes_len = plan_map.get(&cid).map_or(0, |e| e.payload_length as u64);
                 if let Some(t_disp) = worker_in_flight_times.remove(&cid) {
                     let rtt_ms = t_disp.elapsed().as_secs_f64() * 1000.0;
                     if let Some(tel) = telemetry {
-                        tel.record_chunk_ack(channel_name, cid, rtt_ms);
+                        tel.record_chunk_ack(channel_name, cid, rtt_ms, bytes_len);
                     }
                 }
                 let is_new = completed.lock().insert(cid);
@@ -1021,7 +1025,7 @@ pub async fn send_file_session_multipath(
         };
 
         let handle = tokio::spawn(async move {
-            const WORKER_PIPELINE_DEPTH: usize = 16;
+            let worker_pipeline_depth: usize = if is_usb { 16 } else { 8 };
             let mut worker_in_flight = std::collections::HashSet::new();
             let mut worker_in_flight_times = std::collections::HashMap::new();
 
@@ -1103,7 +1107,7 @@ pub async fn send_file_session_multipath(
                             }
                         }
                     }
-                    prepared_res = prepared_rx.recv(), if worker_in_flight.len() < WORKER_PIPELINE_DEPTH && !cancelled.load(std::sync::atomic::Ordering::Relaxed) => {
+                    prepared_res = prepared_rx.recv(), if worker_in_flight.len() < worker_pipeline_depth && !cancelled.load(std::sync::atomic::Ordering::Relaxed) => {
                         match prepared_res {
                             Ok(prepared) => {
                                 let chunk_id = prepared.entry.chunk_id;
@@ -1326,6 +1330,13 @@ where
         "TCP / USB Transport".to_string(),
     );
 
+    let telemetry = get_or_create_telemetry(
+        offer.transfer_id,
+        &offer.file_name,
+        offer.file_size,
+        TransferRole::Receiver,
+    );
+
     // 5. Create and pre-allocate .part file, keeping handle open for the entire session
     std::fs::create_dir_all(dest_dir)?;
     let part_path = dest_dir.join(format!("{}.part", offer.file_name));
@@ -1362,17 +1373,24 @@ where
 
     // Spawn high-throughput background disk writer to decouple disk I/O from TCP socket reads
     struct DiskWriteTask {
+        chunk_id: u32,
         file_offset: u64,
         payload: Vec<u8>,
+        queue_depth: u32,
     }
 
     let (disk_tx, mut disk_rx) = tokio::sync::mpsc::channel::<DiskWriteTask>(128);
     let mut writer_file = file;
+    let tel_for_disk = telemetry.clone();
     let disk_writer_handle = tokio::task::spawn_blocking(move || -> Result<(), std::io::Error> {
         use std::io::{Seek, SeekFrom, Write};
         while let Some(task) = disk_rx.blocking_recv() {
+            let t_w0 = std::time::Instant::now();
+            let len = task.payload.len() as u64;
             writer_file.seek(SeekFrom::Start(task.file_offset))?;
             writer_file.write_all(&task.payload)?;
+            let write_us = t_w0.elapsed().as_micros() as u64;
+            tel_for_disk.record_disk_write(task.chunk_id, len, write_us, task.queue_depth);
         }
         writer_file.flush()?;
         drop(writer_file);
@@ -1393,7 +1411,10 @@ where
 
         match frame {
             Message::ChunkData(chunk_data) => {
+                let t_v0 = std::time::Instant::now();
                 let computed_checksum = compute_xxhash64(&chunk_data.payload);
+                let verify_us = t_v0.elapsed().as_micros() as u32;
+
                 if computed_checksum != chunk_data.checksum {
                     let nack = Message::ChunkNack(ChunkNackData {
                         transfer_id: chunk_data.transfer_id,
@@ -1418,6 +1439,7 @@ where
                     let ack = Message::ChunkAck(ChunkAckData {
                         transfer_id: chunk_data.transfer_id,
                         chunk_id: chunk_data.chunk_id,
+                        receiver_verify_us: Some(verify_us),
                     });
                     transport.send_frame(&ack).await?;
                     continue;
@@ -1448,16 +1470,21 @@ where
                 let ack = Message::ChunkAck(ChunkAckData {
                     transfer_id: chunk_data.transfer_id,
                     chunk_id: chunk_data.chunk_id,
+                    receiver_verify_us: Some(verify_us),
                 });
                 transport.send_frame(&ack).await?;
 
                 // Dispatch disk write to background worker (async backpressure if queue fills)
+                let q_depth = (128 - disk_tx.capacity()) as u32;
                 let _ = disk_tx.send(DiskWriteTask {
+                    chunk_id: chunk_data.chunk_id,
                     file_offset: chunk_data.file_offset,
                     payload: chunk_data.payload,
+                    queue_depth: q_depth,
                 }).await;
             }
             Message::Complete(complete_data) => {
+                let t_fin0 = std::time::Instant::now();
                 // Drop writer channel and await completion of all background disk writes
                 drop(disk_tx);
                 if let Ok(res) = disk_writer_handle.await {
@@ -1485,6 +1512,9 @@ where
                         TransferStatus::Failed,
                         Some("CRC32C mismatch".to_string()),
                     );
+                    telemetry.mark_failed("CRC32C mismatch");
+                    let data_dir = default_data_dir();
+                    export_and_clean_telemetry(complete_data.transfer_id, &data_dir);
                     return Err(TransferSessionError::ChecksumMismatch(format!(
                         "File CRC32C mismatch: expected 0x{:08X}, got 0x{:08X}",
                         complete_data.file_checksum, file_crc
@@ -1496,10 +1526,17 @@ where
 
                 set_transfer_status(complete_data.transfer_id, TransferStatus::Completed, None);
 
+                let fin_ms = t_fin0.elapsed().as_millis() as u64;
+                telemetry.record_finalize(fin_ms, true);
+                telemetry.mark_completed();
+                let data_dir = default_data_dir();
+                export_and_clean_telemetry(complete_data.transfer_id, &data_dir);
+
                 // Send final completion Ack
                 let ack = Message::ChunkAck(ChunkAckData {
                     transfer_id: complete_data.transfer_id,
                     chunk_id: u32::MAX,
+                    receiver_verify_us: None,
                 });
                 transport.send_frame(&ack).await?;
                 return Ok(final_path);

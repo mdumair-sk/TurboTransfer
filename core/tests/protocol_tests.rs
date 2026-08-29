@@ -42,6 +42,7 @@ fn sample_messages() -> Vec<Message> {
         Message::ChunkAck(ChunkAckData {
             transfer_id: t_id,
             chunk_id: 5,
+            receiver_verify_us: Some(1500),
         }),
         Message::ChunkNack(ChunkNackData {
             transfer_id: t_id,
@@ -56,18 +57,42 @@ fn sample_messages() -> Vec<Message> {
             file_checksum: 0x87654321,
         }),
         Message::Heartbeat(HeartbeatData { sequence: 42 }),
+        Message::BatchChunkAck(BatchChunkAckData {
+            transfer_id: t_id,
+            chunk_ids: vec![1, 2, 3],
+            sum_receiver_verify_us: Some(4200),
+        }),
     ]
 }
 
 #[test]
 fn test_roundtrip_all_message_types() {
     let messages = sample_messages();
-    assert_eq!(messages.len(), 12);
+    assert_eq!(messages.len(), 13);
 
     for original in &messages {
         let encoded = encode_frame(original).expect("Encode should succeed");
         let decoded = decode_frame(&encoded).expect("Decode should succeed");
         assert_eq!(original, &decoded, "Message roundtrip failed for type 0x{:02X}", original.message_type());
+    }
+}
+
+#[test]
+fn test_legacy_chunk_ack_wire_compatibility() {
+    let t_id = Uuid::new_v4();
+    // Simulate legacy 20-byte payload: transfer_id (16) + chunk_id (4) without Option<u32>
+    let mut legacy_payload = bincode::serialize(&t_id).unwrap();
+    legacy_payload.extend_from_slice(&5u32.to_le_bytes());
+    assert_eq!(legacy_payload.len(), 20);
+
+    let decoded = Message::decode_payload(MSG_TYPE_CHUNK_ACK, &legacy_payload).expect("Must decode legacy ChunkAck");
+    match decoded {
+        Message::ChunkAck(ack) => {
+            assert_eq!(ack.transfer_id, t_id);
+            assert_eq!(ack.chunk_id, 5);
+            assert_eq!(ack.receiver_verify_us, None);
+        }
+        _ => panic!("Expected Message::ChunkAck"),
     }
 }
 

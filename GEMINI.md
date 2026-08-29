@@ -53,11 +53,10 @@ powershell -ExecutionPolicy Bypass -File .\tools\phone-builder.ps1 build -Packag
 
 ---
 
-### 4. Android App Build & Install
+### 4. Android App Build, Install & Auto-Deploy (1-Step Pipeline)
 ```powershell
-cd android
-powershell -ExecutionPolicy Bypass -File ..\tools\phone-builder.ps1 build-core
-.\gradlew.bat installDebug
+# Compiles Rust on phone (2s), builds APK incrementally, installs via ADB, and auto-launches app
+powershell -ExecutionPolicy Bypass -File .\tools\phone-builder.ps1 deploy
 ```
 
 ---

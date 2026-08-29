@@ -76,6 +76,8 @@ pub struct ChunkDataPayload {
 pub struct ChunkAckData {
     pub transfer_id: Uuid,
     pub chunk_id: u32,
+    #[serde(default)]
+    pub receiver_verify_us: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,6 +117,8 @@ pub struct HeartbeatData {
 pub struct BatchChunkAckData {
     pub transfer_id: Uuid,
     pub chunk_ids: Vec<u32>,
+    #[serde(default)]
+    pub sum_receiver_verify_us: Option<u32>,
 }
 
 /// The 13 wire-protocol message types for TurboTransfer.
@@ -184,8 +188,21 @@ impl Message {
                 Message::ChunkData(data)
             }
             MSG_TYPE_CHUNK_ACK => {
-                let data: ChunkAckData = bincode::deserialize(payload)
-                    .map_err(|e| ProtocolError::DeserializationError(e.to_string()))?;
+                let data: ChunkAckData = if payload.len() == 20 {
+                    // Legacy 20-byte payload: transfer_id (16) + chunk_id (4)
+                    let t_id = bincode::deserialize(&payload[0..16])
+                        .map_err(|e| ProtocolError::DeserializationError(e.to_string()))?;
+                    let c_id = bincode::deserialize(&payload[16..20])
+                        .map_err(|e| ProtocolError::DeserializationError(e.to_string()))?;
+                    ChunkAckData {
+                        transfer_id: t_id,
+                        chunk_id: c_id,
+                        receiver_verify_us: None,
+                    }
+                } else {
+                    bincode::deserialize(payload)
+                        .map_err(|e| ProtocolError::DeserializationError(e.to_string()))?
+                };
                 Message::ChunkAck(data)
             }
             MSG_TYPE_CHUNK_NACK => {
@@ -219,8 +236,23 @@ impl Message {
                 Message::Heartbeat(data)
             }
             MSG_TYPE_BATCH_CHUNK_ACK => {
-                let data: BatchChunkAckData = bincode::deserialize(payload)
-                    .map_err(|e| ProtocolError::DeserializationError(e.to_string()))?;
+                let data: BatchChunkAckData = match bincode::deserialize(payload) {
+                    Ok(d) => d,
+                    Err(_) => {
+                        #[derive(Deserialize)]
+                        struct LegacyBatchChunkAckData {
+                            transfer_id: Uuid,
+                            chunk_ids: Vec<u32>,
+                        }
+                        let leg: LegacyBatchChunkAckData = bincode::deserialize(payload)
+                            .map_err(|e| ProtocolError::DeserializationError(e.to_string()))?;
+                        BatchChunkAckData {
+                            transfer_id: leg.transfer_id,
+                            chunk_ids: leg.chunk_ids,
+                            sum_receiver_verify_us: None,
+                        }
+                    }
+                };
                 Message::BatchChunkAck(data)
             }
             other => return Err(ProtocolError::InvalidMessageType(other)),

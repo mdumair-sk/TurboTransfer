@@ -13,7 +13,7 @@
 
 param (
     [Parameter(Position = 0)]
-    [ValidateSet("build-core", "build", "test", "sync", "shell", "clean", "status", "bench")]
+    [ValidateSet("build-core", "deploy", "install-app", "build", "test", "sync", "shell", "clean", "status", "bench")]
     [string]$Command = "build-core",
 
     [Parameter(Position = 1)]
@@ -143,6 +143,34 @@ elseif ($Command -eq "build-core") {
     if (Test-Path $ktDestFile) {
         Write-Host "Successfully updated turbotransfer_core.kt" -ForegroundColor Green
     }
+}
+elseif ($Command -in @("deploy", "install-app")) {
+    # 1. Build native core on Snapdragon 8 Elite
+    & $PSCommandPath "build-core"
+
+    # 2. Assemble and install APK on phone
+    Write-Host "`nAssembling & installing Android APK on phone..." -ForegroundColor Yellow
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $androidDir = Join-Path $ProjectRoot "android"
+    $gradlew = Join-Path $androidDir "gradlew.bat"
+
+    $gradleTask = if ($Release) { "installRelease" } else { "installDebug" }
+
+    Push-Location $androidDir
+    try {
+        & $gradlew $gradleTask
+    } finally {
+        Pop-Location
+    }
+
+    $sw.Stop()
+    $elapsedSec = [math]::Round($sw.Elapsed.TotalSeconds, 2)
+    Write-Host "APK installed in ${elapsedSec}s!" -ForegroundColor Green
+
+    # 3. Launch App on phone
+    Write-Host "Launching TurboTransfer on phone..." -ForegroundColor Cyan
+    & $ADB shell am start -n com.turbotransfer/.MainActivity
+    Write-Host "TurboTransfer is live on phone!" -ForegroundColor Green
 }
 elseif ($Command -eq "build") {
     Sync-SourceCode

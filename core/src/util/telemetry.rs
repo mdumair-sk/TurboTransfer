@@ -87,6 +87,8 @@ pub struct ChannelMetric {
     pub channel_name: String,
     pub bytes_transferred: u64,
     pub chunks_transferred: u32,
+    pub throughput_mbps: f64,
+    pub max_in_flight: u32,
     pub avg_socket_write_us: f64,
     pub avg_rtt_ms: f64,
     pub p95_rtt_ms: f64,
@@ -119,20 +121,24 @@ pub struct BottleneckReport {
     pub recommendations: Vec<String>,
 }
 
-struct ChannelTracker {
+struct TelemetryChannelTracker {
     bytes: u64,
     chunks: u32,
+    current_in_flight: u32,
+    max_in_flight: u32,
     socket_write_durations_us: Vec<u64>,
     rtt_samples_ms: Vec<f64>,
     nacks: u64,
     disconnects: u64,
 }
 
-impl ChannelTracker {
+impl TelemetryChannelTracker {
     fn new() -> Self {
         Self {
             bytes: 0,
             chunks: 0,
+            current_in_flight: 0,
+            max_in_flight: 0,
             socket_write_durations_us: Vec::with_capacity(1024),
             rtt_samples_ms: Vec::with_capacity(1024),
             nacks: 0,
@@ -166,18 +172,20 @@ pub struct TransferTelemetry {
     duplicate_chunks: AtomicU32,
 
     // Per-channel stats
-    channels: Mutex<HashMap<String, ChannelTracker>>,
+    channels: Mutex<HashMap<String, TelemetryChannelTracker>>,
     peak_throughput_mbps: Mutex<f64>,
+    throughput_sampler: Mutex<(Instant, u64)>,
 }
 
 impl TransferTelemetry {
     pub fn new(transfer_id: Uuid, file_name: String, file_size: u64, role: TransferRole) -> Self {
+        let now = Instant::now();
         Self {
             transfer_id,
             file_name,
             file_size,
             role,
-            start_time: Instant::now(),
+            start_time: now,
             start_utc: Utc::now(),
             end_time: Mutex::new(None),
             events: Mutex::new(Vec::with_capacity(2048)),
@@ -193,6 +201,23 @@ impl TransferTelemetry {
             duplicate_chunks: AtomicU32::new(0),
             channels: Mutex::new(HashMap::new()),
             peak_throughput_mbps: Mutex::new(0.0),
+            throughput_sampler: Mutex::new((now, 0)),
+        }
+    }
+
+    pub fn sample_throughput(&self, added_bytes: u64) {
+        let mut sampler = self.throughput_sampler.lock();
+        sampler.1 += added_bytes;
+        let now = Instant::now();
+        let elapsed = now.duration_since(sampler.0).as_secs_f64();
+        if elapsed >= 0.25 {
+            let mbps = (sampler.1 as f64 / (1024.0 * 1024.0)) / elapsed;
+            let mut peak = self.peak_throughput_mbps.lock();
+            if mbps > *peak {
+                *peak = mbps;
+            }
+            sampler.0 = now;
+            sampler.1 = 0;
         }
     }
 
@@ -272,9 +297,13 @@ impl TransferTelemetry {
 
     pub fn record_chunk_sent(&self, channel_name: &str, chunk_id: u32, bytes: u64, socket_write_us: u64) {
         let mut channels = self.channels.lock();
-        let tracker = channels.entry(channel_name.to_string()).or_insert_with(ChannelTracker::new);
+        let tracker = channels.entry(channel_name.to_string()).or_insert_with(TelemetryChannelTracker::new);
         tracker.bytes += bytes;
         tracker.chunks += 1;
+        tracker.current_in_flight += 1;
+        if tracker.current_in_flight > tracker.max_in_flight {
+            tracker.max_in_flight = tracker.current_in_flight;
+        }
         if tracker.socket_write_durations_us.len() < 50_000 {
             tracker.socket_write_durations_us.push(socket_write_us);
         }
@@ -294,23 +323,26 @@ impl TransferTelemetry {
         }
     }
 
-    pub fn record_chunk_ack(&self, channel_name: &str, chunk_id: u32, rtt_ms: f64) {
-        let mut channels = self.channels.lock();
-        let tracker = channels.entry(channel_name.to_string()).or_insert_with(ChannelTracker::new);
-        if tracker.rtt_samples_ms.len() < 50_000 {
-            tracker.rtt_samples_ms.push(rtt_ms);
+    pub fn record_chunk_ack(&self, channel_name: &str, chunk_id: u32, ack_latency_ms: f64, bytes: u64) {
+        {
+            let mut channels = self.channels.lock();
+            let tracker = channels.entry(channel_name.to_string()).or_insert_with(TelemetryChannelTracker::new);
+            tracker.current_in_flight = tracker.current_in_flight.saturating_sub(1);
+            if tracker.rtt_samples_ms.len() < 50_000 {
+                tracker.rtt_samples_ms.push(ack_latency_ms);
+            }
         }
+        self.sample_throughput(bytes);
 
         if chunk_id % 32 == 0 || chunk_id == 0 {
-            drop(channels);
             self.record_event(
                 TransferStage::NetAck,
                 EventLevel::Debug,
                 channel_name,
                 Some(chunk_id),
-                Some((rtt_ms * 1000.0) as u64),
-                None,
-                format!("Received ACK for chunk #{} on {} (RTT: {:.2} ms)", chunk_id, channel_name, rtt_ms),
+                Some((ack_latency_ms * 1000.0) as u64),
+                Some(bytes),
+                format!("Received ACK for chunk #{} on {} (Chunk ACK Latency: {:.2} ms)", chunk_id, channel_name, ack_latency_ms),
                 None,
             );
         }
@@ -319,7 +351,7 @@ impl TransferTelemetry {
     pub fn record_chunk_nack(&self, channel_name: &str, chunk_id: u32, reason: &str) {
         {
             let mut channels = self.channels.lock();
-            let tracker = channels.entry(channel_name.to_string()).or_insert_with(ChannelTracker::new);
+            let tracker = channels.entry(channel_name.to_string()).or_insert_with(TelemetryChannelTracker::new);
             tracker.nacks += 1;
         }
         self.record_event(
@@ -337,7 +369,7 @@ impl TransferTelemetry {
     pub fn record_channel_disconnect(&self, channel_name: &str, reason: &str) {
         {
             let mut channels = self.channels.lock();
-            let tracker = channels.entry(channel_name.to_string()).or_insert_with(ChannelTracker::new);
+            let tracker = channels.entry(channel_name.to_string()).or_insert_with(TelemetryChannelTracker::new);
             tracker.disconnects += 1;
         }
         self.record_event(
@@ -360,7 +392,7 @@ impl TransferTelemetry {
             }
         }
         let mut channels = self.channels.lock();
-        let tracker = channels.entry(channel_name.to_string()).or_insert_with(ChannelTracker::new);
+        let tracker = channels.entry(channel_name.to_string()).or_insert_with(TelemetryChannelTracker::new);
         tracker.bytes += bytes;
         tracker.chunks += 1;
 
@@ -510,7 +542,7 @@ impl TransferTelemetry {
 
         let total_bytes = self.file_size;
         let avg_throughput_mbps = (total_bytes as f64 / (1024.0 * 1024.0)) / total_secs;
-        let peak_throughput_mbps = *self.peak_throughput_mbps.lock();
+        let peak_throughput_mbps = (*self.peak_throughput_mbps.lock()).max(avg_throughput_mbps);
 
         // Sender Disk Read stats
         let read_list = self.read_durations_us.lock().clone();
@@ -553,10 +585,17 @@ impl TransferTelemetry {
         for (name, tracker) in channels_guard.iter() {
             let (write_avg, _) = calc_avg_p95(&tracker.socket_write_durations_us);
             let (rtt_avg, rtt_p95) = calc_avg_p95_f64(&tracker.rtt_samples_ms);
+            let ch_throughput = if total_secs > 0.0 {
+                (tracker.bytes as f64 / (1024.0 * 1024.0)) / total_secs
+            } else {
+                0.0
+            };
             channel_metrics.push(ChannelMetric {
                 channel_name: name.clone(),
                 bytes_transferred: tracker.bytes,
                 chunks_transferred: tracker.chunks,
+                throughput_mbps: ch_throughput,
+                max_in_flight: tracker.max_in_flight,
                 avg_socket_write_us: write_avg,
                 avg_rtt_ms: rtt_avg,
                 p95_rtt_ms: rtt_p95,
@@ -600,13 +639,12 @@ impl TransferTelemetry {
         } else {
             let total_disconnects: u64 = channel_metrics.iter().map(|c| c.disconnect_count).sum();
             let total_nacks: u64 = channel_metrics.iter().map(|c| c.nack_count).sum();
-            let max_p95_rtt: f64 = channel_metrics.iter().map(|c| c.p95_rtt_ms).fold(0.0, f64::max);
 
-            if total_disconnects > 0 || total_nacks > 5 || max_p95_rtt > 250.0 {
-                primary_bottleneck = "NETWORK_LATENCY_JITTER".to_string();
+            if total_disconnects > 0 || total_nacks > 3 {
+                primary_bottleneck = "NETWORK_PACKET_CORRUPTION_OR_DROP".to_string();
                 recommendations.push(format!(
-                    "High network latency/packet loss detected (P95 RTT: {:.1} ms, NACKs: {}, Disconnects: {}). Ensure 5GHz Wi-Fi line-of-sight or verify USB cable connection.",
-                    max_p95_rtt, total_nacks, total_disconnects
+                    "Network packet corruption or disconnect detected (NACKs: {}, Disconnects: {}). Check physical USB connection or 5GHz Wi-Fi line-of-sight.",
+                    total_nacks, total_disconnects
                 ));
             } else if hash_avg_us > 25_000.0 && sender_checksum_mbps < 200.0 {
                 primary_bottleneck = "CPU_CHECKSUM_BOTTLENECK".to_string();
@@ -623,8 +661,8 @@ impl TransferTelemetry {
             } else {
                 primary_bottleneck = "NETWORK_BANDWIDTH_LIMIT".to_string();
                 recommendations.push(format!(
-                    "Transfer was network bandwidth-limited at {:.1} MB/s across {} active channel(s). Disk I/O and CPU checksums operated faster than the physical wireless link.",
-                    avg_throughput_mbps, channel_metrics.len()
+                    "Transfer was network bandwidth-limited at {:.1} MB/s across {} active channel(s) (Peak: {:.1} MB/s). Disk I/O and CPU checksums operated faster than the physical wireless link.",
+                    avg_throughput_mbps, channel_metrics.len(), peak_throughput_mbps
                 ));
             }
         }
@@ -700,14 +738,20 @@ impl TransferTelemetry {
         log_content.push_str("\n--- Channels Breakdown ---\n");
         for ch in &report.channels {
             log_content.push_str(&format!(
-                "  [{}] Chunks: {}, Bytes: {}, Socket Write: {:.1} us, Avg RTT: {:.1} ms (P95: {:.1} ms), NACKs: {}, Disconnects: {}\n",
-                ch.channel_name, ch.chunks_transferred, ch.bytes_transferred, ch.avg_socket_write_us, ch.avg_rtt_ms, ch.p95_rtt_ms, ch.nack_count, ch.disconnect_count
+                "  [{}] Chunks: {}, Bytes: {} ({:.2} MB/s), Socket Write: {:.1} us, Avg ACK Latency: {:.1} ms (P95: {:.1} ms), Max In-Flight: {}, NACKs: {}, Disconnects: {}\n",
+                ch.channel_name, ch.chunks_transferred, ch.bytes_transferred, ch.throughput_mbps, ch.avg_socket_write_us, ch.avg_rtt_ms, ch.p95_rtt_ms, ch.max_in_flight, ch.nack_count, ch.disconnect_count
             ));
         }
         log_content.push_str("\n--- Stage Latencies ---\n");
-        log_content.push_str(&format!("  Sender Disk Read    : {:.1} MB/s (avg {:.1} us, p95 {:.1} us)\n", report.sender_disk_read_mbps, report.sender_disk_read_avg_us, report.sender_disk_read_p95_us));
-        log_content.push_str(&format!("  Sender CPU Checksum : {:.1} MB/s (avg {:.1} us)\n", report.sender_checksum_mbps, report.sender_checksum_avg_us));
-        log_content.push_str(&format!("  Receiver Disk Write : {:.1} MB/s (avg {:.1} us, p95 {:.1} us, max queue {})\n", report.receiver_disk_write_mbps, report.receiver_disk_write_avg_us, report.receiver_disk_write_p95_us, report.receiver_max_queue_depth));
+        if self.role == TransferRole::Sender {
+            log_content.push_str(&format!("  Sender Disk Read    : {:.1} MB/s (avg {:.1} us, p95 {:.1} us)\n", report.sender_disk_read_mbps, report.sender_disk_read_avg_us, report.sender_disk_read_p95_us));
+            log_content.push_str(&format!("  Sender CPU Checksum : {:.1} MB/s (avg {:.1} us)\n", report.sender_checksum_mbps, report.sender_checksum_avg_us));
+            log_content.push_str("  Receiver Disk Write : N/A (Sender Role Session)\n");
+        } else {
+            log_content.push_str("  Sender Disk Read    : N/A (Receiver Role Session)\n");
+            log_content.push_str("  Sender CPU Checksum : N/A (Receiver Role Session)\n");
+            log_content.push_str(&format!("  Receiver Disk Write : {:.1} MB/s (avg {:.1} us, p95 {:.1} us, max queue {})\n", report.receiver_disk_write_mbps, report.receiver_disk_write_avg_us, report.receiver_disk_write_p95_us, report.receiver_max_queue_depth));
+        }
         log_content.push_str(&format!("  Receiver Finalize   : {} ms\n", report.receiver_finalize_ms));
 
         log_content.push_str("\n================================================================================\n");
