@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use turbotransfer_core::manifest::TransferStatus;
 use turbotransfer_core::transfer::{
     cancel_transfer, enter_receive_mode, get_devices, get_progress, get_transfers,
-    pause_transfer, resume_transfer, start_transfer, BenchmarkResult, DeviceInfo,
-    TransferProgress, TransferSummary, TransportPreference,
+    leave_receive_mode, pause_transfer, resume_transfer, start_transfer, BenchmarkResult,
+    DeviceInfo, TransferProgress, TransferSummary, TransportPreference,
 };
 use uuid::Uuid;
 
@@ -532,9 +532,19 @@ impl AppState {
 
     /// Switches directly to a target screen.
     pub fn navigate_to(&mut self, screen: Screen) {
+        let prev_screen = self.current_screen;
         self.current_screen = screen;
         self.selected_index = 0;
         self.status_message = None;
+
+        if prev_screen == Screen::ReceiveFiles
+            && screen != Screen::ReceiveFiles
+            && screen != Screen::IncomingPrompt
+            && screen != Screen::TransferScreen
+            && screen != Screen::TransferDetails
+        {
+            self.stop_receive_mode();
+        }
 
         match screen {
             Screen::ReceiveFiles => self.start_receive_mode(),
@@ -661,6 +671,15 @@ impl AppState {
                 });
             }
             self.status_message = Some("Listening for incoming transfers on port 9876".to_string());
+        }
+    }
+
+    /// Leaves receive mode via Transfer API `leave_receive_mode()` (§7, §13).
+    pub fn stop_receive_mode(&mut self) {
+        if self.is_receiving {
+            self.is_receiving = false;
+            leave_receive_mode(None);
+            self.status_message = Some("Receiver service stopped".to_string());
         }
     }
 }

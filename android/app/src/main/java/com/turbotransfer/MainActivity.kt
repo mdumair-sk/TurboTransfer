@@ -48,6 +48,10 @@ class MainActivity : ComponentActivity() {
                     Log.d("TurboTransfer", "Broadcast received: ENTER_RECEIVE dest=$dest")
                     mainViewModel.handleEnterReceiveBroadcast(dest)
                 }
+                "com.turbotransfer.STOP_RECEIVE" -> {
+                    Log.d("TurboTransfer", "Broadcast received: STOP_RECEIVE")
+                    mainViewModel.handleStopReceiveBroadcast()
+                }
             }
         }
     }
@@ -69,6 +73,7 @@ class MainActivity : ComponentActivity() {
             addAction("com.turbotransfer.START_HOTSPOT")
             addAction("com.turbotransfer.STOP_HOTSPOT")
             addAction("com.turbotransfer.ENTER_RECEIVE")
+            addAction("com.turbotransfer.STOP_RECEIVE")
         }
         ContextCompat.registerReceiver(
             this,

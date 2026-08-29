@@ -66,6 +66,10 @@ class TransferRepositoryImpl @Inject constructor(
     }
 
     override suspend fun startTransfer(filePath: String, address: String?, fileName: String?): Resource<String> {
+        // Ensure local receiver is stopped so port 9876 is released for outgoing USB/ADB tunnel
+        rustCoreDataSource.stopReceiveMode()
+        _isListeningFlow.value = false
+
         val result = rustCoreDataSource.startTransfer(
             filePath = filePath,
             fileName = fileName,

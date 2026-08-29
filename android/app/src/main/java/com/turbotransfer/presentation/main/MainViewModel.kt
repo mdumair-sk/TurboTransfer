@@ -12,6 +12,7 @@ import com.turbotransfer.domain.usecase.transfer.ObserveActiveTransferUseCase
 import com.turbotransfer.domain.usecase.transfer.ObserveTransferProgressUseCase
 import com.turbotransfer.domain.usecase.transfer.PollIncomingTransferUseCase
 import com.turbotransfer.domain.usecase.transfer.StartTransferUseCase
+import com.turbotransfer.domain.usecase.transfer.StopReceiveModeUseCase
 import com.turbotransfer.domain.usecase.settings.GetSettingsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
@@ -25,6 +26,7 @@ class MainViewModel @Inject constructor(
     private val observeTransferProgressUseCase: ObserveTransferProgressUseCase,
     private val startTransferUseCase: StartTransferUseCase,
     private val enterReceiveModeUseCase: EnterReceiveModeUseCase,
+    private val stopReceiveModeUseCase: StopReceiveModeUseCase,
     private val startHotspotUseCase: StartHotspotUseCase,
     private val stopHotspotUseCase: StopHotspotUseCase,
     private val pollIncomingTransferUseCase: PollIncomingTransferUseCase,
@@ -92,6 +94,12 @@ class MainViewModel @Inject constructor(
             val dir = destDir ?: getSettingsUseCase.getReceiveDestDir()
             enterReceiveModeUseCase(dir, null)
             _selectedTab.value = 1
+        }
+    }
+
+    fun handleStopReceiveBroadcast() {
+        viewModelScope.launch {
+            stopReceiveModeUseCase()
         }
     }
 }

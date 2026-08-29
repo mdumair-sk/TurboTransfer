@@ -13,16 +13,23 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -382,6 +389,144 @@ fun AdvancedOptionsBottomSheet(
     }
 }
 
+private fun copyLogsToClipboard(context: Context, text: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+    val clip = ClipData.newPlainText("TurboTransfer Engine Logs", text)
+    clipboard?.setPrimaryClip(clip)
+    Toast.makeText(context, "Logs copied to clipboard", Toast.LENGTH_SHORT).show()
+}
+
+private fun loadTransferLogs(context: Context, transferId: String, item: HistoryItem): String {
+    // 1. Try reading raw .log file from disk
+    val logFile = File(context.filesDir, "logs/$transferId.log")
+    if (logFile.exists() && logFile.length() > 0) {
+        try {
+            return logFile.readText()
+        } catch (_: Exception) {}
+    }
+
+    // 2. Try in-memory UniFFI event stream
+    try {
+        val events = uniffi.turbotransfer_core.getTransferLogs(transferId, null)
+        if (events.isNotEmpty()) {
+            val sb = StringBuilder()
+            sb.appendLine("=== TurboTransfer Engine Telemetry: $transferId ===")
+            sb.appendLine("File: ${item.fileName} (${item.formattedSize})")
+            sb.appendLine("Status: ${item.status}")
+            sb.appendLine("--------------------------------------------------------------------------------")
+            for (ev in events) {
+                val relMs = String.format("%6d", ev.relativeMs)
+                sb.appendLine("$relMs | ${ev.level.padEnd(5)} | ${ev.stage.padEnd(10)} | ${ev.channel.padEnd(14)} | ${ev.message}")
+            }
+            return sb.toString()
+        }
+    } catch (_: Exception) {}
+
+    // 3. Try reading .json report from disk
+    val jsonFile = File(context.filesDir, "logs/$transferId.json")
+    if (jsonFile.exists() && jsonFile.length() > 0) {
+        try {
+            return jsonFile.readText()
+        } catch (_: Exception) {}
+    }
+
+    // 4. Synthesized session telemetry fallback
+    return """
+=== TurboTransfer Engine Telemetry Summary ===
+Transfer ID:       $transferId
+File Name:         ${item.fileName}
+File Size:         ${item.formattedSize} (${item.fileSize} bytes)
+Direction:         ${if (item.isOutgoing) "Sender (Sent to PC)" else "Receiver (Received from PC)"}
+Status:            ${item.status}
+Elapsed Time:      ${String.format("%.2f", item.durationMs / 1000.0)}s (${item.durationMs} ms)
+Average Speed:     ${String.format("%.2f", item.avgSpeedMBps)} MB/s
+Peak Speed:        ${String.format("%.2f", item.peakSpeedMBps)} MB/s
+USB Throughput:    ${String.format("%.2f", item.usbSpeedMBps)} MB/s
+Wi-Fi Throughput:  ${String.format("%.2f", item.wifiSpeedMBps)} MB/s
+Storage Path:      ${item.filePath}
+Timestamp:         ${java.util.Date(item.timestamp)}
+--------------------------------------------------------------------------------
+No event log stream recorded for this session.
+    """.trimIndent()
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TransferLogViewerFullScreenDialog(
+    item: HistoryItem,
+    logContent: String,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val vScroll = rememberScrollState()
+    val hScroll = rememberScrollState()
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text("Engine Logs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text(
+                                item.fileName,
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { copyLogsToClipboard(context, logContent) }) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy logs")
+                        }
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.Default.FullscreenExit, contentDescription = "Exit fullscreen")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
+                )
+            }
+        ) { paddingValues ->
+            Surface(
+                color = Color(0xFF121212),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+            ) {
+                SelectionContainer {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(vScroll)
+                            .horizontalScroll(hScroll)
+                            .padding(16.dp)
+                    ) {
+                        Text(
+                            text = logContent.ifBlank { "No logs available for this transfer." },
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            color = Color(0xFFD4D4D4),
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 /**
  * Detailed Transfer Metrics Dialog with "Open Logs" action for History items.
  */
@@ -395,41 +540,81 @@ fun TransferDetailsDialog(
 ) {
     val context = LocalContext.current
     var showLogs by remember { mutableStateOf(false) }
+    var isFullScreen by remember { mutableStateOf(false) }
+    val logContent = remember(item.id, showLogs) {
+        if (showLogs) loadTransferLogs(context, item.id, item) else ""
+    }
+
+    if (isFullScreen) {
+        TransferLogViewerFullScreenDialog(
+            item = item,
+            logContent = logContent,
+            onDismiss = { isFullScreen = false }
+        )
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(
-                if (showLogs) "Transfer Engine Logs" else "Transfer Details",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
+            if (showLogs) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Engine Logs",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row {
+                        IconButton(
+                            onClick = { copyLogsToClipboard(context, logContent) },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy logs", modifier = Modifier.size(18.dp))
+                        }
+                        IconButton(
+                            onClick = { isFullScreen = true },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Default.Fullscreen, contentDescription = "Full Screen", modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+            } else {
+                Text(
+                    "Transfer Details",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         },
         text = {
             if (showLogs) {
                 Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    color = Color(0xFF141414),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 240.dp)
+                        .heightIn(min = 200.dp, max = 340.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .padding(10.dp)
-                            .fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text("Session ID: ${item.id}", fontFamily = FontFamily.Monospace, fontSize = 10.sp)
-                        Text("File: ${item.fileName}", fontFamily = FontFamily.Monospace, fontSize = 10.sp)
-                        Text("Size: ${item.formattedSize} (${item.fileSize} bytes)", fontFamily = FontFamily.Monospace, fontSize = 10.sp)
-                        Text("Duration: ${item.durationMs} ms", fontFamily = FontFamily.Monospace, fontSize = 10.sp)
-                        Text("Average Speed: ${String.format("%.2f", item.avgSpeedMBps)} MB/s", fontFamily = FontFamily.Monospace, fontSize = 10.sp)
-                        Text("Peak Speed: ${String.format("%.2f", item.peakSpeedMBps)} MB/s", fontFamily = FontFamily.Monospace, fontSize = 10.sp)
-                        Text("USB Speed: ${String.format("%.2f", item.usbSpeedMBps)} MB/s", fontFamily = FontFamily.Monospace, fontSize = 10.sp)
-                        Text("Wi-Fi Speed: ${String.format("%.2f", item.wifiSpeedMBps)} MB/s", fontFamily = FontFamily.Monospace, fontSize = 10.sp)
-                        Text("Path: ${item.filePath}", fontFamily = FontFamily.Monospace, fontSize = 10.sp)
-                        Text("Status: ${item.status} (Verified 0-Copy)", fontFamily = FontFamily.Monospace, fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
+                    SelectionContainer {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .horizontalScroll(rememberScrollState())
+                                .padding(10.dp)
+                        ) {
+                            Text(
+                                text = logContent.ifBlank { "No logs recorded for this transfer." },
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.5.sp,
+                                color = Color(0xFFE0E0E0),
+                                lineHeight = 15.sp
+                            )
+                        }
                     }
                 }
             } else {
@@ -497,22 +682,45 @@ fun TransferDetailsDialog(
             }
         },
         confirmButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (onOpen != null) {
-                    Button(onClick = onOpen) {
-                        Text("Open")
+            if (showLogs) {
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    FilledTonalButton(
+                        onClick = { showLogs = false },
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 10.dp)
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Back to Details", fontWeight = FontWeight.SemiBold)
                     }
                 }
-                if (onShare != null) {
-                    FilledTonalButton(onClick = onShare) {
-                        Text("Share")
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (onOpen != null) {
+                        Button(onClick = onOpen) {
+                            Text("Open")
+                        }
+                    }
+                    if (onShare != null) {
+                        FilledTonalButton(onClick = onShare) {
+                            Text("Share")
+                        }
                     }
                 }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Close")
+            if (!showLogs) {
+                TextButton(onClick = onDismiss) {
+                    Text("Close")
+                }
             }
         }
     )

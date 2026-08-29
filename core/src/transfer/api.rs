@@ -276,6 +276,9 @@ pub async fn start_transfer(
     let transfer_id = Uuid::new_v4();
     let chunk_size = 2 * 1024 * 1024; // 2 MiB chunks for optimal pipeline flow and wire-speed Wi-Fi throughput
 
+    // Stop local receive listener to ensure port 9876 is free for outgoing USB/ADB tunnel
+    leave_receive_mode(None);
+
     let file_name = custom_file_name.clone().unwrap_or_else(|| {
         let resolved_path = std::fs::read_link(&file_path).unwrap_or_else(|_| file_path.clone());
         resolved_path
@@ -1550,15 +1553,21 @@ pub fn get_devices() -> Vec<DeviceInfo> {
 
     // 1. Enumerate connected ADB devices
     if let Ok(adb_devs) = UsbTransport::list_adb_devices() {
+        let is_pc_receiving = !get_receive_listeners().lock().unwrap().is_empty();
         for d in adb_devs {
             if d.state == "device" {
-                let _ = UsbTransport::setup_adb_forward(&d.serial, 9876, 9876);
-                let is_listening = if UsbTransport::is_receiver_listening(&d.serial, 9876) {
+                let is_listening = if is_pc_receiving {
+                    let _ = UsbTransport::setup_receive_adb_tunnels(&d.serial);
                     true
                 } else {
-                    let _ = UsbTransport::trigger_android_receive(&d.serial);
-                    std::thread::sleep(std::time::Duration::from_millis(80));
-                    UsbTransport::is_receiver_listening(&d.serial, 9876)
+                    let _ = UsbTransport::setup_adb_forward(&d.serial, 9876, 9876);
+                    if UsbTransport::is_receiver_listening(&d.serial, 9876) {
+                        true
+                    } else {
+                        let _ = UsbTransport::trigger_android_receive(&d.serial);
+                        std::thread::sleep(std::time::Duration::from_millis(80));
+                        UsbTransport::is_receiver_listening(&d.serial, 9876)
+                    }
                 };
 
                 let name = if let Some(model) = &d.model {

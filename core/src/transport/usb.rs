@@ -434,6 +434,8 @@ impl UsbTransport {
 
     /// Configures ADB reverse tunnel for receiving files from Android and forward tunnel for hotspot metadata.
     pub fn setup_receive_adb_tunnels(serial: &str) -> Result<(), TransportError> {
+        // Stop any stale receive listener on Android phone so port 9876 is free for ADB reverse
+        let _ = Self::trigger_android_stop_receive(serial);
         // Ensure no conflicting forward rule on 9876 exists
         let _ = Self::remove_adb_forward(serial, 9876);
         let _ = Self::setup_adb_reverse(serial, 9876, 9876);
@@ -482,6 +484,13 @@ impl UsbTransport {
         let _ = Self::run_adb_cmd(&["-s", serial, "shell", "am", "start", "-n", "com.turbotransfer/.MainActivity"]);
         let _ = Self::run_adb_cmd(&["-s", serial, "shell", "am", "broadcast", "-a", "com.turbotransfer.ENTER_RECEIVE"]);
         debug!("Triggered ENTER_RECEIVE broadcast on device {}", serial);
+        Ok(())
+    }
+
+    /// Triggers the Android app to stop Receive mode via ADB broadcast so port 9876 is released.
+    pub fn trigger_android_stop_receive(serial: &str) -> Result<(), TransportError> {
+        let _ = Self::run_adb_cmd(&["-s", serial, "shell", "am", "broadcast", "-a", "com.turbotransfer.STOP_RECEIVE"]);
+        debug!("Triggered STOP_RECEIVE broadcast on device {}", serial);
         Ok(())
     }
 
