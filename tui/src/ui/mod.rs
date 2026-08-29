@@ -37,7 +37,7 @@ pub fn render_ui(f: &mut Frame, app: &AppState) {
     // 1. Top Header Bar
     render_header(f, app, chunks[0]);
 
-    // 2. Main Viewport Router (All 15 Screens from TRD §13)
+    // 2. Main Viewport Router
     match app.current_screen {
         Screen::MainMenu => main_menu::render_main_menu(f, app, chunks[1]),
         Screen::SendFiles => send_files::render_send_files(f, app, chunks[1]),
@@ -67,32 +67,34 @@ pub fn render_ui(f: &mut Frame, app: &AppState) {
 
 fn render_header(f: &mut Frame, app: &AppState, area: Rect) {
     let breadcrumb = match app.current_screen {
-        Screen::MainMenu => "Main Menu",
+        Screen::MainMenu => "Dashboard",
         Screen::SendFiles => "Send Files",
         Screen::FileBrowser => "Send Files » File Browser",
-        Screen::DeviceSelection => "Send Files » Target Device",
-        Screen::TransportSelection => "Send Files » Transport Selection",
-        Screen::TransferScreen => "Live Transfer Screen",
-        Screen::TransferDetails => "Transfer Diagnostics & Details",
-        Screen::ReceiveFiles => "Receive Files Mode",
-        Screen::IncomingPrompt => "Incoming Transfer Prompt",
+        Screen::DeviceSelection => "Send Files » Select Device",
+        Screen::TransportSelection => "Send Files » Select Transport",
+        Screen::TransferScreen => "Transfer Monitor",
+        Screen::TransferDetails => "Transfer Diagnostics",
+        Screen::ReceiveFiles => "Receive Mode",
+        Screen::IncomingPrompt => "Incoming Transfer Request",
         Screen::Devices => "Discovered Devices",
-        Screen::Transfers => "Transfers Manager",
+        Screen::Transfers => "Transfers History",
         Screen::Resume => "Cold Resume Selector",
-        Screen::Benchmark => "Benchmark Screen",
+        Screen::Benchmark => "Benchmark Tool",
         Screen::BenchmarkResults => "Benchmark Results",
-        Screen::Settings => "Settings Manager",
+        Screen::Settings => "Settings",
     };
 
     let title_line = Line::from(vec![
-        Span::styled(" TurboTransfer ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Span::styled(format!(" » {} ", breadcrumb), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        Span::styled(format!(" [Pref: {} | Band: {}] ", app.settings.transport_pref, app.settings.p2p_band), Style::default().fg(Color::DarkGray)),
+        Span::styled(" TURBOTRANSFER ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled("│ ", Style::default().fg(Color::DarkGray)),
+        Span::styled(breadcrumb, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("  [Transport: {} │ Band: {}]", app.settings.transport_pref, app.settings.p2p_band), Style::default().fg(Color::DarkGray)),
     ]);
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded);
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::DarkGray));
 
     let para = Paragraph::new(title_line).block(block);
     f.render_widget(para, area);
@@ -101,150 +103,155 @@ fn render_header(f: &mut Frame, app: &AppState, area: Rect) {
 fn render_footer(f: &mut Frame, app: &AppState, area: Rect) {
     let shortcuts = match app.current_screen {
         Screen::MainMenu => vec![
-            Span::styled(" [1-6] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Direct Jump  "),
-            Span::styled(" [Up/Down] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Select  "),
-            Span::styled(" [Enter] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Open  "),
-            Span::styled(" [Q] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Quit"),
+            Span::styled(" [1-6] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Jump  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [↑/↓] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Select  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Enter] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Open  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Q] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Quit", Style::default().fg(Color::Gray)),
         ],
         Screen::SendFiles => vec![
-            Span::styled(" [Up/Down] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Select Option  "),
-            Span::styled(" [Enter] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Confirm  "),
-            Span::styled(" [B] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Browse Files  "),
-            Span::styled(" [Esc] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Main Menu"),
+            Span::styled(" [↑/↓] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Select  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Enter] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Confirm  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [B] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Browse Files  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Main Menu", Style::default().fg(Color::Gray)),
         ],
         Screen::FileBrowser => vec![
-            Span::styled(" [Enter/Right] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Open / Select  "),
-            Span::styled(" [Backspace/Left] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Parent Dir  "),
-            Span::styled(" [Up/Down] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Navigate  "),
-            Span::styled(" [Home/End] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Top/Bottom  "),
-            Span::styled(" [Esc] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Back"),
+            Span::styled(" [Enter/→] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Open/Select  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Backspace/←] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Parent Dir  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Tab] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Path Autocomplete  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Back", Style::default().fg(Color::Gray)),
         ],
         Screen::DeviceSelection => vec![
-            Span::styled(" [Up/Down] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Select Device  "),
-            Span::styled(" [R] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Refresh Devices  "),
-            Span::styled(" [Enter] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Confirm  "),
-            Span::styled(" [Esc] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Back"),
+            Span::styled(" [↑/↓] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Select Device  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [R] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Refresh  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Enter] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Confirm  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Back", Style::default().fg(Color::Gray)),
         ],
         Screen::TransportSelection => vec![
-            Span::styled(" [1-4] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Quick Select  "),
-            Span::styled(" [Up/Down] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Navigate  "),
-            Span::styled(" [Enter] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Start Transfer  "),
-            Span::styled(" [Esc] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Back"),
+            Span::styled(" [1-4] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Quick Select  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Enter] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Start Transfer  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Back", Style::default().fg(Color::Gray)),
         ],
         Screen::TransferScreen => vec![
-            Span::styled(" [P] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Pause  "),
+            Span::styled(" [P] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Pause  ", Style::default().fg(Color::Gray)),
             Span::styled(" [R] ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::raw("Resume  "),
+            Span::styled("Resume  ", Style::default().fg(Color::Gray)),
             Span::styled(" [C] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            Span::raw("Cancel  "),
+            Span::styled("Cancel  ", Style::default().fg(Color::Gray)),
             Span::styled(" [D] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::raw("Details  "),
-            Span::styled(" [Esc] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Main Menu"),
+            Span::styled("Diagnostics  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Dashboard", Style::default().fg(Color::Gray)),
         ],
         Screen::TransferDetails => vec![
-            Span::styled(" [P] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Pause  "),
+            Span::styled(" [P] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Pause  ", Style::default().fg(Color::Gray)),
             Span::styled(" [C] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            Span::raw("Cancel  "),
-            Span::styled(" [Esc] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Back to Monitor"),
+            Span::styled("Cancel  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Back to Monitor", Style::default().fg(Color::Gray)),
         ],
         Screen::ReceiveFiles => vec![
-            Span::styled(" [S] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Settings  "),
-            Span::styled(" [Esc] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Main Menu"),
+            Span::styled(" [S] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Settings  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Dashboard", Style::default().fg(Color::Gray)),
         ],
         Screen::Devices => vec![
-            Span::styled(" [Up/Down] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Select Device  "),
-            Span::styled(" [R] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Refresh  "),
-            Span::styled(" [S/Enter] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Send File  "),
-            Span::styled(" [Esc] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Main Menu"),
+            Span::styled(" [↑/↓] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Select  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [R] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Refresh  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [S/Enter] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Send File  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Dashboard", Style::default().fg(Color::Gray)),
         ],
         Screen::Transfers => vec![
-            Span::styled(" [Tab] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Switch Category  "),
-            Span::styled(" [R] ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::raw("Resume  "),
+            Span::styled(" [Tab] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Switch Category  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Enter] ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled("Resume Selected  ", Style::default().fg(Color::Gray)),
             Span::styled(" [D] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::raw("Details  "),
-            Span::styled(" [Esc] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Main Menu"),
+            Span::styled("Details  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Dashboard", Style::default().fg(Color::Gray)),
         ],
         Screen::Resume => vec![
             Span::styled(" [Enter] ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::raw("Resume Selected  "),
-            Span::styled(" [Esc] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Back"),
+            Span::styled("Resume Selected  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Back", Style::default().fg(Color::Gray)),
         ],
         Screen::Benchmark => vec![
-            Span::styled(" [Up/Down] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Select Transport  "),
-            Span::styled(" [S] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Cycle Size  "),
-            Span::styled(" [Enter] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Run Benchmark  "),
-            Span::styled(" [Esc] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Main Menu"),
+            Span::styled(" [↑/↓] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Select Transport  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [S] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Cycle Size  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Enter] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Run Benchmark  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Dashboard", Style::default().fg(Color::Gray)),
         ],
         Screen::BenchmarkResults => vec![
-            Span::styled(" [Esc] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Benchmark Screen  "),
-            Span::styled(" [M] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Main Menu"),
+            Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Benchmark Screen  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [M] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Dashboard", Style::default().fg(Color::Gray)),
         ],
         Screen::Settings => vec![
-            Span::styled(" [Tab] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Next Tab  "),
-            Span::styled(" [Enter/Space] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Toggle Setting  "),
-            Span::styled(" [Esc] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Main Menu"),
+            Span::styled(" [Tab] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Next Tab  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Enter/Space] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Toggle  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Dashboard", Style::default().fg(Color::Gray)),
         ],
         _ => vec![
-            Span::styled(" [Esc] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Back  "),
-            Span::styled(" [1-6] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("Main Menu Shortcuts"),
+            Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Back  ", Style::default().fg(Color::Gray)),
+            Span::styled(" [1-6] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("Dashboard Shortcuts", Style::default().fg(Color::Gray)),
         ],
     };
 
     let status = app.status_message.as_deref().unwrap_or("");
-    let status_span = Span::styled(format!("  {}  ", status), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD));
+    let status_span = Span::styled(
+        format!("  ● {}  ", status),
+        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+    );
 
     let mut full_spans = shortcuts;
     if !status.is_empty() {
         full_spans.push(status_span);
     }
 
-    let block = Block::default().borders(Borders::ALL);
-    let para = Paragraph::new(Line::from(full_spans)).alignment(Alignment::Center).block(block);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::DarkGray));
+
+    let para = Paragraph::new(Line::from(full_spans))
+        .alignment(Alignment::Center)
+        .block(block);
     f.render_widget(para, area);
 }

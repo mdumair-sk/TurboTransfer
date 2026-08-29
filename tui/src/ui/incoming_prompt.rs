@@ -7,13 +7,13 @@ use ratatui::Frame;
 use crate::app::AppState;
 
 pub fn render_incoming_prompt(f: &mut Frame, app: &AppState, area: Rect) {
-    let popup_area = centered_rect(60, 45, area);
+    let popup_area = centered_rect(64, 46, area);
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
-        .border_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
         .title(" INCOMING FILE TRANSFER OFFER ");
 
     let (file_name, file_size_str, sender_str) = if let Some(ref info) = app.incoming_prompt {
@@ -29,23 +29,23 @@ pub fn render_incoming_prompt(f: &mut Frame, app: &AppState, area: Rect) {
     let text = vec![
         Line::from(""),
         Line::from(vec![
-            Span::styled("  Sender Device: ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-            Span::styled(sender_str, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled("  Sender Device: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(sender_str, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
-            Span::styled("  Incoming File: ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-            Span::styled(file_name, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled("  Incoming File: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(file_name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
-            Span::styled("  File Size:     ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-            Span::styled(file_size_str, Style::default().fg(Color::Yellow)),
+            Span::styled("  Payload Size:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(file_size_str, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(""),
-        Line::from(Span::styled("  Do you want to accept and download this file?", Style::default().fg(Color::White))),
+        Line::from(Span::styled("  Accept incoming file transfer?", Style::default().fg(Color::Gray))),
         Line::from(""),
         Line::from(vec![
-            Span::styled("   [Enter] ACCEPT & RECEIVE   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::styled("   [Esc] REJECT OFFER   ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled("   [Y / Enter] ACCEPT & RECEIVE   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled("   [N / Esc] REJECT   ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
         ]),
     ];
 

@@ -249,13 +249,7 @@ impl AppState {
         {
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 handle.spawn(async {
-                    if let Ok(devs) = turbotransfer_core::transport::UsbTransport::list_adb_devices() {
-                        for dev in devs {
-                            if dev.state == "device" {
-                                let _ = turbotransfer_core::transport::UsbTransport::setup_default_adb_tunnels(&dev.serial);
-                            }
-                        }
-                    }
+                    let _ = turbotransfer_core::transport::UsbTransport::list_adb_devices();
                 });
             }
         }
@@ -374,17 +368,26 @@ impl AppState {
     pub fn start_send_transfer(&mut self, file_path: PathBuf, target_device_id: Option<Uuid>, pref: TransportPreference) {
         let path_clone = file_path.clone();
 
+        let (tx, rx) = std::sync::mpsc::channel();
         tokio::spawn(async move {
-            let _ = start_transfer(path_clone, None, target_device_id, pref, None).await;
+            let res = start_transfer(path_clone, None, target_device_id, pref, None).await;
+            let _ = tx.send(res.map(|h| h.transfer_id));
         });
 
-        self.refresh_transfers();
-        if let Some(first_active) = self.cached_transfers.iter().find(|t| t.status == TransferStatus::InProgress) {
-            self.active_transfer_id = Some(first_active.transfer_id);
-            self.active_progress = get_progress(first_active.transfer_id);
+        // Wait up to 150ms for initial handle registration
+        if let Ok(Ok(tid)) = rx.recv_timeout(std::time::Duration::from_millis(150)) {
+            self.active_transfer_id = Some(tid);
+            self.active_progress = get_progress(tid);
+            self.status_message = Some("Transfer session connecting...".to_string());
+        } else {
+            self.refresh_transfers();
+            if let Some(first_active) = self.cached_transfers.iter().find(|t| t.status == TransferStatus::InProgress) {
+                self.active_transfer_id = Some(first_active.transfer_id);
+                self.active_progress = get_progress(first_active.transfer_id);
+            }
+            self.status_message = Some("Transfer session connecting...".to_string());
         }
 
-        self.status_message = Some("Transfer session connecting...".to_string());
         self.navigate_to(Screen::TransferScreen);
     }
 

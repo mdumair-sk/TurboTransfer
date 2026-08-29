@@ -19,17 +19,25 @@ pub fn render_resume(f: &mut Frame, app: &AppState, area: Rect) {
 
     // Header
     let header_text = Line::from(vec![
-        Span::styled(" COLD RESUME SELECTOR ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Span::styled("— Resume interrupted transfers from persisted meta.json files (TRD §6.2, §7, §14)", Style::default().fg(Color::Gray)),
+        Span::styled(" COLD RESUME SELECTOR ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled("│ Resume interrupted transfers from stored meta.json state", Style::default().fg(Color::DarkGray)),
     ]);
-    let header_para = Paragraph::new(header_text).alignment(Alignment::Center);
+    let header_para = Paragraph::new(header_text)
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        );
     f.render_widget(header_para, chunks[0]);
 
     // Resumable List
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title(" Incomplete & Resumable Transfers on Disk ");
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(" Resumable Incomplete Transfers ");
 
     let mut lines = Vec::new();
     lines.push(Line::from(""));
@@ -48,18 +56,25 @@ pub fn render_resume(f: &mut Frame, app: &AppState, area: Rect) {
             let prefix = if is_selected { " ► " } else { "   " };
 
             let name_style = if is_selected {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(Color::Gray)
             };
 
             let size_str = format!("{:.2} MB", t.file_size as f64 / (1024.0 * 1024.0));
 
             lines.push(Line::from(vec![
-                Span::styled(prefix, if is_selected { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) }),
+                Span::styled(
+                    prefix,
+                    if is_selected {
+                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    },
+                ),
                 Span::styled(format!("{:<32}", t.file_name), name_style),
-                Span::styled(format!("{:<16}", size_str), Style::default().fg(Color::Gray)),
-                Span::styled(" [RESUMABLE] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("{:<16}", size_str), Style::default().fg(Color::White)),
+                Span::styled(" [RESUMABLE] ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
                 Span::styled(format!(" ID: {}", t.transfer_id), Style::default().fg(Color::DarkGray)),
             ]));
         }

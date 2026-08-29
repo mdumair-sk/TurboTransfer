@@ -110,7 +110,7 @@ fun TurboTransferApp(
                     }
                 },
                 actions = {
-                    if (activeSession != null && currentProgress != null && currentProgress?.status == TransferStatus.IN_PROGRESS) {
+                    if (selectedTab != 2 && activeSession != null && currentProgress != null && currentProgress?.status == TransferStatus.IN_PROGRESS) {
                         val mbps = currentProgress!!.aggregateSpeedMBps
                         Surface(
                             color = MaterialTheme.colorScheme.primaryContainer,

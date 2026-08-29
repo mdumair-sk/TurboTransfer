@@ -451,7 +451,7 @@ object UriUtils {
                 val docId = DocumentsContract.getDocumentId(uri)
                 val split = docId.split(":")
                 val type = split.getOrNull(0) ?: ""
-                val id = split.getOrNull(1)
+                val id = if (split.size > 1) split[1] else split[0]
 
                 val contentUri = when (type.lowercase()) {
                     "image" -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
@@ -460,10 +460,9 @@ object UriUtils {
                     else -> MediaStore.Files.getContentUri("external")
                 }
 
-                if (id != null) {
-                    val path = getDataColumn(context, contentUri, "_id=?", arrayOf(id))
-                    if (path != null && File(path).exists()) return path
-                }
+                val path = getDataColumn(context, contentUri, "_id=?", arrayOf(id))
+                    ?: getDataColumn(context, MediaStore.Files.getContentUri("external"), "_id=?", arrayOf(id))
+                if (path != null && File(path).exists()) return path
             }
         }
         // MediaStore (general content://)

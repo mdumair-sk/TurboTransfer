@@ -1,4 +1,4 @@
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
@@ -16,88 +16,95 @@ pub fn render_send_files(f: &mut Frame, app: &AppState, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // Header status
-            Constraint::Length(10), // Options list
+            Constraint::Length(7), // Options list in one clean block
             Constraint::Min(6),    // Selected File Summary
         ])
         .split(area);
 
-    // Header summary
-    let header_text = Line::from(vec![
-        Span::styled(" SEND FILES ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Span::styled("— Select a source file to transmit to a peer device", Style::default().fg(Color::Gray)),
-    ]);
-    let header_para = Paragraph::new(header_text).alignment(Alignment::Center);
-    f.render_widget(header_para, chunks[0]);
+    // Options Block (Clean list, no nested border soup)
+    let options_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(" Select Source Method ");
 
-    // Options list
-    let option_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(vec![Constraint::Length(3); SEND_OPTIONS.len()])
-        .split(chunks[1]);
+    let mut option_lines = Vec::new();
+    option_lines.push(Line::from(""));
 
     for (i, (title, desc, hotkey)) in SEND_OPTIONS.iter().enumerate() {
         let is_selected = i == app.selected_index;
-        let border_style = if is_selected {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+
+        let (cursor, key_style, title_style, desc_style, bg_style) = if is_selected {
+            (
+                " ❯ ",
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Gray),
+                Style::default().bg(Color::Rgb(35, 38, 48)),
+            )
         } else {
-            Style::default().fg(Color::DarkGray)
+            (
+                "   ",
+                Style::default().fg(Color::DarkGray),
+                Style::default().fg(Color::Gray),
+                Style::default().fg(Color::DarkGray),
+                Style::default(),
+            )
         };
 
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(if is_selected { BorderType::Double } else { BorderType::Plain })
-            .border_style(border_style);
+        let line = Line::from(vec![
+            Span::styled(cursor, if is_selected { Style::default().fg(Color::White).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) }),
+            Span::styled(format!("[{}] ", hotkey), key_style),
+            Span::styled(format!("{:<24}", title), title_style),
+            Span::styled(format!(" {}", desc), desc_style),
+        ]).style(bg_style);
 
-        let key_badge = Span::styled(format!(" [{}] ", hotkey), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
-        let title_span = Span::styled(
-            *title,
-            if is_selected {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            },
-        );
-        let desc_span = Span::styled(format!("  — {}", desc), Style::default().fg(Color::DarkGray));
-
-        let para = Paragraph::new(Line::from(vec![key_badge, title_span, desc_span])).block(block);
-        f.render_widget(para, option_chunks[i]);
+        option_lines.push(line);
     }
+
+    let options_para = Paragraph::new(option_lines).block(options_block);
+    f.render_widget(options_para, chunks[0]);
 
     // Selected File preview box
     let file_info_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title(" Selected File ");
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(" Selected Payload ");
 
     let mut preview_lines = Vec::new();
     if let Some(ref path) = app.selected_file_path {
         let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown");
         let size_str = if let Ok(meta) = std::fs::metadata(path) {
-            format!("{:.2} MB ({} bytes)", meta.len() as f64 / (1024.0 * 1024.0), meta.len())
+            if meta.is_dir() {
+                "Directory".to_string()
+            } else {
+                format!("{:.2} MB ({} bytes)", meta.len() as f64 / (1024.0 * 1024.0), meta.len())
+            }
         } else {
             "Unknown size".to_string()
         };
 
+        preview_lines.push(Line::from(""));
         preview_lines.push(Line::from(vec![
-            Span::styled("  File Name: ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-            Span::styled(file_name, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled("   Target Name:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(file_name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
         ]));
         preview_lines.push(Line::from(vec![
-            Span::styled("  File Path: ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-            Span::styled(path.display().to_string(), Style::default().fg(Color::Cyan)),
+            Span::styled("   Full Path:    ", Style::default().fg(Color::DarkGray)),
+            Span::styled(path.display().to_string(), Style::default().fg(Color::White)),
         ]));
         preview_lines.push(Line::from(vec![
-            Span::styled("  File Size: ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-            Span::styled(size_str, Style::default().fg(Color::Yellow)),
+            Span::styled("   Payload Size: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(size_str, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
         ]));
         preview_lines.push(Line::from(""));
-        preview_lines.push(Line::from(Span::styled("  ► Press [Enter] to proceed to Device Selection", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))));
+        preview_lines.push(Line::from(Span::styled("   ► Press [Enter] to proceed to Device Selection", Style::default().fg(Color::White).add_modifier(Modifier::BOLD))));
     } else {
         preview_lines.push(Line::from(""));
-        preview_lines.push(Line::from(Span::styled("  No file selected yet. Choose an option above to select a file.", Style::default().fg(Color::DarkGray))));
+        preview_lines.push(Line::from(Span::styled("   No file selected yet. Choose an option above or press [B] to browse files.", Style::default().fg(Color::DarkGray))));
     }
 
     let preview_para = Paragraph::new(preview_lines).block(file_info_block);
-    f.render_widget(preview_para, chunks[2]);
+    f.render_widget(preview_para, chunks[1]);
 }

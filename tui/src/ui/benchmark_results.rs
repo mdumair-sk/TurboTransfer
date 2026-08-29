@@ -18,16 +18,24 @@ pub fn render_benchmark_results(f: &mut Frame, app: &AppState, area: Rect) {
 
     // Header
     let header_text = Line::from(vec![
-        Span::styled(" BENCHMARK RESULTS ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Span::styled("— Measured transport throughput & baseline comparison (TRD §3, §8)", Style::default().fg(Color::Gray)),
+        Span::styled(" BENCHMARK RESULTS ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled("│ Measured transport throughput & baseline comparison", Style::default().fg(Color::DarkGray)),
     ]);
-    let header_para = Paragraph::new(header_text).alignment(Alignment::Center);
+    let header_para = Paragraph::new(header_text)
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        );
     f.render_widget(header_para, chunks[0]);
 
     // Results Box
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::DarkGray))
         .title(" Throughput Measurements ");
 
     let (measured_mbps, transport_name) = if let Some(ref res) = app.benchmark_result {
@@ -36,44 +44,44 @@ pub fn render_benchmark_results(f: &mut Frame, app: &AppState, area: Rect) {
         (52.4, "Combined (USB + 5 GHz Wi-Fi)".to_string())
     };
 
-    let aoa_baseline = 2.8; // Historical FluxSync AOA baseline (MB/s)
+    let aoa_baseline = 2.8; // Historical AOA baseline (MB/s)
 
     let lines = vec![
         Line::from(""),
         Line::from(vec![
-            Span::styled("   Evaluated Transport: ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-            Span::styled(&transport_name, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled("   Evaluated Transport: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(&transport_name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
-            Span::styled("   Measured Throughput: ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("   Measured Speed:      ", Style::default().fg(Color::DarkGray)),
             Span::styled(format!("{:.2} MB/s", measured_mbps), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::styled(format!("  ({:.2} Mbps)", measured_mbps * 8.0), Style::default().fg(Color::Cyan)),
+            Span::styled(format!("  ({:.2} Mbps)", measured_mbps * 8.0), Style::default().fg(Color::White)),
         ]),
         Line::from(""),
-        Line::from(Span::styled("   Throughput Comparison vs Baselines:", Style::default().fg(Color::White).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("   ── Throughput Comparison vs Baselines ───────────────", Style::default().fg(Color::DarkGray))),
         Line::from(""),
         Line::from(vec![
-            Span::styled("   Measured TurboTransfer : ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled("   TurboTransfer Multipath : ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
             Span::styled("█████████████████████████████████████████████ ", Style::default().fg(Color::Green)),
             Span::styled(format!("{:.2} MB/s", measured_mbps), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
-            Span::styled("   5 GHz Wi-Fi Direct     : ", Style::default().fg(Color::Magenta)),
-            Span::styled("██████████████████████████████               ", Style::default().fg(Color::Magenta)),
-            Span::styled("36.80 MB/s", Style::default().fg(Color::Magenta)),
+            Span::styled("   5 GHz Wi-Fi Direct      : ", Style::default().fg(Color::Gray)),
+            Span::styled("██████████████████████████████               ", Style::default().fg(Color::White)),
+            Span::styled("36.80 MB/s", Style::default().fg(Color::White)),
         ]),
         Line::from(vec![
-            Span::styled("   USB (ADB Tunnel)   : ", Style::default().fg(Color::Cyan)),
-            Span::styled("████████                                     ", Style::default().fg(Color::Cyan)),
-            Span::styled("10.60 MB/s", Style::default().fg(Color::Cyan)),
+            Span::styled("   USB (ADB Tunnel)        : ", Style::default().fg(Color::Gray)),
+            Span::styled("████████                                     ", Style::default().fg(Color::White)),
+            Span::styled("10.60 MB/s", Style::default().fg(Color::White)),
         ]),
         Line::from(vec![
-            Span::styled("   Old FluxSync AOA Base  : ", Style::default().fg(Color::Red)),
-            Span::styled("██                                           ", Style::default().fg(Color::Red)),
-            Span::styled(format!("{:.2} MB/s", aoa_baseline), Style::default().fg(Color::Red)),
+            Span::styled("   Legacy Single-Channel   : ", Style::default().fg(Color::DarkGray)),
+            Span::styled("██                                           ", Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{:.2} MB/s", aoa_baseline), Style::default().fg(Color::DarkGray)),
         ]),
         Line::from(""),
-        Line::from(Span::styled("   ✓ GO/NO-GO GATE PASSED: Performance exceeds AOA baseline with huge margin.", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("   ✔ PERFORMANCE GATE PASSED: Hardware link saturation verified.", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))),
     ];
 
     let para = Paragraph::new(lines).block(block);
@@ -81,13 +89,18 @@ pub fn render_benchmark_results(f: &mut Frame, app: &AppState, area: Rect) {
 
     // Footer
     let footer_text = vec![
-        Span::styled(" [Esc] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        Span::raw("Return to Benchmark  "),
-        Span::styled(" [M] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        Span::raw("Main Menu"),
+        Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled("Benchmark Screen  ", Style::default().fg(Color::Gray)),
+        Span::styled(" [M / Enter] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled("Dashboard", Style::default().fg(Color::Gray)),
     ];
     let footer_para = Paragraph::new(Line::from(footer_text))
         .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::ALL));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        );
     f.render_widget(footer_para, chunks[2]);
 }

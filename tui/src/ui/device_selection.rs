@@ -18,44 +18,59 @@ pub fn render_device_selection(f: &mut Frame, app: &AppState, area: Rect) {
 
     // Header
     let header_text = Line::from(vec![
-        Span::styled(" SELECT TARGET DEVICE ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Span::styled("— Choose the destination Android phone or Windows PC", Style::default().fg(Color::Gray)),
+        Span::styled(" SELECT TARGET DEVICE ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled("│ Choose the destination peer device", Style::default().fg(Color::DarkGray)),
     ]);
-    let header_para = Paragraph::new(header_text).alignment(Alignment::Center);
+    let header_para = Paragraph::new(header_text)
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        );
     f.render_widget(header_para, chunks[0]);
 
     // Device List Block
     let list_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title(" Discovered Devices (via Transfer API get_devices()) ");
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(" Available Devices ");
 
     let mut lines = Vec::new();
     lines.push(Line::from(""));
 
     if app.cached_devices.is_empty() {
-        lines.push(Line::from(Span::styled("   No active devices found. Ensure USB debugging or Wi-Fi Direct is active.", Style::default().fg(Color::DarkGray))));
+        lines.push(Line::from(Span::styled("   No active devices detected. Ensure USB debugging or Wi-Fi Direct is enabled.", Style::default().fg(Color::DarkGray))));
     } else {
         for (i, dev) in app.cached_devices.iter().enumerate() {
             let is_selected = i == app.selected_device_index;
             let prefix = if is_selected { " ► " } else { "   " };
 
             let name_style = if is_selected {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(Color::Gray)
             };
 
             let status_badge = if dev.is_connected {
                 Span::styled(" [CONNECTED] ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
             } else {
-                Span::styled(" [DISCONNECTED] ", Style::default().fg(Color::Red))
+                Span::styled(" [DISCONNECTED] ", Style::default().fg(Color::DarkGray))
             };
 
             lines.push(Line::from(vec![
-                Span::styled(prefix, if is_selected { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) }),
+                Span::styled(
+                    prefix,
+                    if is_selected {
+                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    },
+                ),
                 Span::styled(format!("{:<28}", dev.device_name), name_style),
-                Span::styled(format!("({:<18}) ", dev.transport), Style::default().fg(Color::Cyan)),
+                Span::styled(format!("({:<18}) ", dev.transport), Style::default().fg(Color::White)),
                 status_badge,
                 Span::styled(format!(" ID: {}", dev.device_id), Style::default().fg(Color::DarkGray)),
             ]));
@@ -73,9 +88,14 @@ pub fn render_device_selection(f: &mut Frame, app: &AppState, area: Rect) {
         .unwrap_or_else(|| "No file selected".to_string());
 
     let file_line = Line::from(vec![
-        Span::styled(" Transmitting File: ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-        Span::styled(file_str, Style::default().fg(Color::Cyan)),
+        Span::styled(" Payload: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(file_str, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
     ]);
-    let file_para = Paragraph::new(file_line).block(Block::default().borders(Borders::ALL));
+    let file_para = Paragraph::new(file_line).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::DarkGray)),
+    );
     f.render_widget(file_para, chunks[2]);
 }

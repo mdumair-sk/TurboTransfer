@@ -233,6 +233,7 @@ pub fn handle_key_event(app: &mut AppState, key: KeyEvent) {
             KeyCode::Char('r') | KeyCode::Char('R') => app.resume_active(),
             KeyCode::Char('c') | KeyCode::Char('C') => app.cancel_active(),
             KeyCode::Char('d') | KeyCode::Char('D') => app.navigate_to(Screen::TransferDetails),
+            KeyCode::Char('q') | KeyCode::Char('Q') => app.navigate_to(Screen::MainMenu),
             KeyCode::Enter => {
                 if app.is_receiving {
                     app.navigate_to(Screen::ReceiveFiles);
@@ -247,7 +248,7 @@ pub fn handle_key_event(app: &mut AppState, key: KeyEvent) {
         Screen::TransferDetails => match key.code {
             KeyCode::Char('p') | KeyCode::Char('P') => app.pause_active(),
             KeyCode::Char('c') | KeyCode::Char('C') => app.cancel_active(),
-            KeyCode::Esc => app.navigate_to(Screen::TransferScreen),
+            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => app.navigate_to(Screen::TransferScreen),
             _ => {}
         },
 

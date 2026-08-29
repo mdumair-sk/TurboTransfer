@@ -1,4 +1,4 @@
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
@@ -13,88 +13,70 @@ pub fn render_benchmark(f: &mut Frame, app: &AppState, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Length(14), // Transport selector
-            Constraint::Min(6),     // Payload size & Launch card
-            Constraint::Length(3),  // Footer
+            Constraint::Length(8), // Transport selector in one clean block
+            Constraint::Min(6),    // Payload size & Launch card
         ])
         .split(area);
 
-    // Header
-    let header_text = Line::from(vec![
-        Span::styled(" HARDWARE THROUGHPUT BENCHMARK ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Span::styled("— Measure raw byte throughput across ADB & 5 GHz Wi-Fi (TRD §8, §9)", Style::default().fg(Color::Gray)),
-    ]);
-    let header_para = Paragraph::new(header_text).alignment(Alignment::Center);
-    f.render_widget(header_para, chunks[0]);
+    // Transport Options Block
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(" Select Benchmark Transport ");
 
-    // Transport Options
-    let card_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(vec![Constraint::Length(3); TRANSPORTS.len()])
-        .split(chunks[1]);
+    let mut lines = Vec::new();
+    lines.push(Line::from(""));
 
     for (i, (title, desc, _)) in TRANSPORTS.iter().enumerate() {
         let is_selected = i == app.benchmark_transport_index;
-        let border_style = if is_selected {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+
+        let (cursor, title_style, desc_style, bg_style) = if is_selected {
+            (
+                " ❯ ",
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Gray),
+                Style::default().bg(Color::Rgb(35, 38, 48)),
+            )
         } else {
-            Style::default().fg(Color::DarkGray)
+            (
+                "   ",
+                Style::default().fg(Color::Gray),
+                Style::default().fg(Color::DarkGray),
+                Style::default(),
+            )
         };
 
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(if is_selected { BorderType::Double } else { BorderType::Plain })
-            .border_style(border_style);
+        let line = Line::from(vec![
+            Span::styled(cursor, if is_selected { Style::default().fg(Color::White).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) }),
+            Span::styled(format!("{:<38}", title), title_style),
+            Span::styled(format!(" — {}", desc), desc_style),
+        ]).style(bg_style);
 
-        let title_span = Span::styled(
-            format!("{:<38}", title),
-            if is_selected {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            },
-        );
-        let desc_span = Span::styled(format!("  — {}", desc), Style::default().fg(Color::DarkGray));
-
-        let line = Line::from(vec![title_span, desc_span]);
-        let para = Paragraph::new(line).block(block);
-        f.render_widget(para, card_chunks[i]);
+        lines.push(line);
     }
+
+    let para = Paragraph::new(lines).block(block);
+    f.render_widget(para, chunks[0]);
 
     // Launch Card
     let launch_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::DarkGray))
         .title(" Test Configuration ");
 
     let launch_lines = vec![
         Line::from(""),
         Line::from(vec![
-            Span::styled("   Selected Test Payload: ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-            Span::styled(format!("{} MB memory stream", app.benchmark_size_mb), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled("   Selected Test Payload: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{} MB memory stream", app.benchmark_size_mb), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
             Span::styled("  (Press [S] to cycle size)", Style::default().fg(Color::DarkGray)),
         ]),
         Line::from(""),
-        Line::from(Span::styled("   ► Press [Enter] to RUN BENCHMARK via Transfer API run_benchmark()", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("   ► Press [Enter] to RUN BENCHMARK", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))),
     ];
 
     let launch_para = Paragraph::new(launch_lines).block(launch_block);
-    f.render_widget(launch_para, chunks[2]);
-
-    // Footer
-    let footer_text = vec![
-        Span::styled(" [Enter] ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-        Span::raw("Start Benchmark  "),
-        Span::styled(" [S] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        Span::raw("Cycle Size  "),
-        Span::styled(" [Up/Down] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        Span::raw("Select Transport  "),
-        Span::styled(" [Esc] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        Span::raw("Main Menu"),
-    ];
-    let footer_para = Paragraph::new(Line::from(footer_text))
-        .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::ALL));
-    f.render_widget(footer_para, chunks[3]);
+    f.render_widget(launch_para, chunks[1]);
 }

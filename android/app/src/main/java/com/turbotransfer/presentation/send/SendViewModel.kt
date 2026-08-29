@@ -12,6 +12,7 @@ import com.turbotransfer.domain.usecase.hotspot.StopHotspotUseCase
 import com.turbotransfer.domain.usecase.transfer.ObserveTransferProgressUseCase
 import com.turbotransfer.domain.usecase.transfer.StartTransferUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -28,6 +29,8 @@ class SendViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(SendUiState())
     val uiState: StateFlow<SendUiState> = _uiState.asStateFlow()
+
+    private var batchTransferJob: Job? = null
 
     init {
         // Observe receiver discovery
@@ -76,6 +79,7 @@ class SendViewModel @Inject constructor(
     }
 
     fun clearQueue() {
+        batchTransferJob?.cancel()
         _uiState.update { it.copy(transferQueue = emptyList(), isQueueRunning = false, currentQueueIndex = 0) }
     }
 
@@ -113,35 +117,42 @@ class SendViewModel @Inject constructor(
             return
         }
 
-        _uiState.update { it.copy(isQueueRunning = true, currentQueueIndex = 0) }
-        processNextQueueItem(targetAddress, onTransferStarted)
-    }
+        batchTransferJob?.cancel()
+        batchTransferJob = viewModelScope.launch {
+            _uiState.update { it.copy(isQueueRunning = true, currentQueueIndex = 0) }
+            onTransferStarted()
 
-    private fun processNextQueueItem(targetAddress: String, onTransferStarted: () -> Unit) {
-        val queue = _uiState.value.transferQueue
-        if (queue.isNotEmpty()) {
-            val item = queue.first()
-            viewModelScope.launch {
+            while (_uiState.value.transferQueue.isNotEmpty()) {
+                val item = _uiState.value.transferQueue.first()
                 val res = startTransferUseCase(item.path, targetAddress, item.displayName)
                 when (res) {
                     is Resource.Success -> {
-                        onTransferStarted()
                         val transferId = res.data
-                        observeTransferProgressUseCase(transferId).collect { progress ->
+                        var transferFinished = false
+
+                        // Await terminal status for this specific item before proceeding to the next
+                        observeTransferProgressUseCase(transferId).takeWhile { !transferFinished }.collect { progress ->
                             when (progress?.status) {
                                 TransferStatus.COMPLETED -> {
                                     removeFileFromQueue(item)
-                                    if (_uiState.value.transferQueue.isNotEmpty()) {
-                                        processNextQueueItem(targetAddress, onTransferStarted)
-                                    } else {
-                                        _uiState.update { it.copy(isQueueRunning = false, currentQueueIndex = 0) }
-                                    }
+                                    transferFinished = true
                                 }
                                 TransferStatus.FAILED, TransferStatus.CANCELLED -> {
-                                    _uiState.update { it.copy(isQueueRunning = false) }
+                                    _uiState.update {
+                                        it.copy(
+                                            isQueueRunning = false,
+                                            userMessage = "Transfer failed for ${item.displayName}"
+                                        )
+                                    }
+                                    transferFinished = true
                                 }
                                 else -> {}
                             }
+                        }
+
+                        // If stopped or cancelled, exit loop
+                        if (!_uiState.value.isQueueRunning) {
+                            return@launch
                         }
                     }
                     is Resource.Error -> {
@@ -151,11 +162,12 @@ class SendViewModel @Inject constructor(
                                 isQueueRunning = false
                             )
                         }
+                        return@launch
                     }
                     is Resource.Loading -> {}
                 }
             }
-        } else {
+
             _uiState.update { it.copy(isQueueRunning = false, currentQueueIndex = 0) }
         }
     }

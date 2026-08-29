@@ -17,20 +17,21 @@ pub fn render_file_browser(f: &mut Frame, app: &AppState, area: Rect) {
 
     // Current Directory Banner & Search Pill
     let mut banner_spans = vec![
-        Span::styled(" Directory: ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-        Span::styled(app.browser_current_dir.display().to_string(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(" Directory: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(app.browser_current_dir.display().to_string(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
     ];
 
     if !app.file_search_query.is_empty() {
-        banner_spans.push(Span::styled("   🔍 Search: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
-        banner_spans.push(Span::styled(format!(" \"{}\" ", app.file_search_query), Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD)));
-        banner_spans.push(Span::styled(" (Type to search, Esc/Backspace to clear)", Style::default().fg(Color::DarkGray)));
+        banner_spans.push(Span::styled("   🔍 Filter: ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)));
+        banner_spans.push(Span::styled(format!(" \"{}\" ", app.file_search_query), Style::default().fg(Color::Black).bg(Color::White).add_modifier(Modifier::BOLD)));
+        banner_spans.push(Span::styled(" (Type to filter, Backspace/Esc to clear)", Style::default().fg(Color::DarkGray)));
     }
 
     let banner_text = Line::from(banner_spans);
     let banner_block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded);
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::DarkGray));
     let banner_para = Paragraph::new(banner_text).block(banner_block);
     f.render_widget(banner_para, chunks[0]);
 
@@ -38,7 +39,8 @@ pub fn render_file_browser(f: &mut Frame, app: &AppState, area: Rect) {
     let list_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title(" Files & Directories ");
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(" Files & Directories (Enter: Select / Backspace: Up) ");
 
     let mut lines = Vec::new();
 
@@ -46,8 +48,23 @@ pub fn render_file_browser(f: &mut Frame, app: &AppState, area: Rect) {
     let is_parent_selected = app.browser_selected_index == 0;
     let parent_prefix = if is_parent_selected { " ► " } else { "   " };
     lines.push(Line::from(vec![
-        Span::styled(parent_prefix, if is_parent_selected { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) }),
-        Span::styled("📁  ..  (Parent Directory)", if is_parent_selected { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::Gray) }),
+        Span::styled(
+            parent_prefix,
+            if is_parent_selected {
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            },
+        ),
+        Span::styled("📁 ", Style::default().fg(Color::White)),
+        Span::styled(
+            ".. (Parent Directory)",
+            if is_parent_selected {
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            },
+        ),
     ]));
 
     for (i, path) in app.browser_entries.iter().enumerate() {
@@ -58,7 +75,15 @@ pub fn render_file_browser(f: &mut Frame, app: &AppState, area: Rect) {
         let is_dir = path.is_dir();
 
         let (icon, size_str, style) = if is_dir {
-            ("📁 ", "<DIR>".to_string(), if is_selected { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::Cyan) })
+            (
+                "📁 ",
+                "<DIR>".to_string(),
+                if is_selected {
+                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                },
+            )
         } else {
             let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
             let formatted_size = if size > 1024 * 1024 * 1024 {
@@ -70,14 +95,29 @@ pub fn render_file_browser(f: &mut Frame, app: &AppState, area: Rect) {
             } else {
                 format!("{} B", size)
             };
-            ("📄 ", formatted_size, if is_selected { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::White) })
+            (
+                "📄 ",
+                formatted_size,
+                if is_selected {
+                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Gray)
+                },
+            )
         };
 
         lines.push(Line::from(vec![
-            Span::styled(prefix, if is_selected { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) }),
-            Span::raw(icon),
-            Span::styled(format!("{:<40}", name), style),
-            Span::styled(format!("{:>15}", size_str), Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                prefix,
+                if is_selected {
+                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                },
+            ),
+            Span::styled(icon, Style::default().fg(Color::White)),
+            Span::styled(format!("{:<44}", name), style),
+            Span::styled(format!("{:>14}", size_str), Style::default().fg(Color::DarkGray)),
         ]));
     }
 

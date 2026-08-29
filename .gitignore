@@ -41,6 +41,7 @@ hs_err_pid*
 
 # Application Runtime Output
 received_files/
+downloads/
 *.log
 
 # IDE & Editor Files

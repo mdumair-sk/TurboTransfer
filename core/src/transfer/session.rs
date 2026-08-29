@@ -731,45 +731,59 @@ pub async fn send_file_session_multipath(
     );
 
     // 1. Perform Hello and TransferOffer handshakes across all transports
+    // Fault-tolerant: if one stream fails handshake, skip it instead of aborting the entire transfer.
     let mut resume_ranges_combined: Vec<(u32, u32)> = Vec::new();
+    let mut failed_indices: Vec<usize> = Vec::new();
     for (idx, (transport, is_usb)) in transports.iter_mut().enumerate() {
         let ch_name = if *is_usb { "USB" } else { "Wi-Fi" };
-        let hello = Message::Hello(HelloData {
-            device_id: sender_device_id,
-            device_name: sender_device_name.to_string(),
-            protocol_version: 1,
-        });
-        transport.send_frame(&hello).await?;
 
-        let peer_hello = transport
-            .receive_frame()
-            .await?
-            .ok_or_else(|| TransferSessionError::UnexpectedMessage("EOF during Hello on multipath transport".into()))?;
-        if !matches!(peer_hello, Message::Hello(_)) {
-            return Err(TransferSessionError::UnexpectedMessage(format!(
-                "Expected Hello, got {:?}",
-                peer_hello
-            )));
-        }
+        let handshake_result: Result<Option<Vec<(u32, u32)>>, TransferSessionError> = async {
+            let hello = Message::Hello(HelloData {
+                device_id: sender_device_id,
+                device_name: sender_device_name.to_string(),
+                protocol_version: 1,
+            });
+            transport.send_frame(&hello).await?;
 
-        let offer = Message::TransferOffer(TransferOfferData {
-            transfer_id,
-            file_id: manifest.file_id,
-            file_name: manifest.file_name.clone(),
-            file_size: manifest.file_size,
-            chunk_size: manifest.chunk_size,
-            total_chunks: manifest.total_chunks,
-            checksum_algo: "xxhash64".to_string(),
-        });
-        transport.send_frame(&offer).await?;
+            let peer_hello = transport
+                .receive_frame()
+                .await?
+                .ok_or_else(|| TransferSessionError::UnexpectedMessage("EOF during Hello on multipath transport".into()))?;
+            if !matches!(peer_hello, Message::Hello(_)) {
+                return Err(TransferSessionError::UnexpectedMessage(format!(
+                    "Expected Hello, got {:?}",
+                    peer_hello
+                )));
+            }
 
-        let response = transport
-            .receive_frame()
-            .await?
-            .ok_or_else(|| TransferSessionError::UnexpectedMessage("EOF during Offer response on multipath transport".into()))?;
+            let offer = Message::TransferOffer(TransferOfferData {
+                transfer_id,
+                file_id: manifest.file_id,
+                file_name: manifest.file_name.clone(),
+                file_size: manifest.file_size,
+                chunk_size: manifest.chunk_size,
+                total_chunks: manifest.total_chunks,
+                checksum_algo: "xxhash64".to_string(),
+            });
+            transport.send_frame(&offer).await?;
 
-        match response {
-            Message::TransferAccept(accept) => {
+            let response = transport
+                .receive_frame()
+                .await?
+                .ok_or_else(|| TransferSessionError::UnexpectedMessage("EOF during Offer response on multipath transport".into()))?;
+
+            match response {
+                Message::TransferAccept(accept) => Ok(accept.resume_from),
+                Message::TransferReject(reject) => Err(TransferSessionError::Rejected(reject.reason)),
+                other => Err(TransferSessionError::UnexpectedMessage(format!(
+                    "Expected Accept or Reject, got {:?}",
+                    other
+                ))),
+            }
+        }.await;
+
+        match handshake_result {
+            Ok(resume_from) => {
                 telemetry.record_event(
                     TransferStage::Handshake,
                     EventLevel::Info,
@@ -780,30 +794,38 @@ pub async fn send_file_session_multipath(
                     format!("Channel-{} ({}) handshake accepted", idx + 1, ch_name),
                     None,
                 );
-                if let Some(ranges) = accept.resume_from {
+                if let Some(ranges) = resume_from {
                     resume_ranges_combined.extend(ranges);
                 }
             }
-            Message::TransferReject(reject) => {
+            Err(e) => {
                 telemetry.record_event(
                     TransferStage::Handshake,
-                    EventLevel::Error,
+                    EventLevel::Warn,
                     &format!("Channel-{}", idx + 1),
                     None,
                     None,
                     None,
-                    format!("Channel-{} rejected: {}", idx + 1, reject.reason),
+                    format!("Channel-{} ({}) handshake failed, skipping: {}", idx + 1, ch_name, e),
                     None,
                 );
-                return Err(TransferSessionError::Rejected(reject.reason))
-            }
-            other => {
-                return Err(TransferSessionError::UnexpectedMessage(format!(
-                    "Expected Accept or Reject, got {:?}",
-                    other
-                )));
+                log::warn!("Multipath channel-{} ({}) handshake failed: {}", idx + 1, ch_name, e);
+                failed_indices.push(idx);
             }
         }
+    }
+
+    // Remove failed transports in reverse order to preserve indices
+    for &idx in failed_indices.iter().rev() {
+        transports.remove(idx);
+    }
+
+    if transports.is_empty() {
+        return Err(TransferSessionError::Transport(
+            crate::transport::TransportError::Disconnected(
+                "All multipath channels failed handshake — no usable transport".into(),
+            ),
+        ));
     }
 
     // 2. Data Plane: Shared state across all transports

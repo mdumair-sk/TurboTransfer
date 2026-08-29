@@ -413,10 +413,17 @@ pub async fn start_transfer(
                             transports.push((Box::new(t), true));
                             transport_names.push("USB (ADB Tunnel)".to_string());
                         }
-                    }
-
-                    // 2. Connect Wi-Fi Direct channel with bonded sockets
-                    for hotspot_ip in &["10.18.163.130:9876", "192.168.43.1:9876", "192.168.43.2:9876", "192.168.1.19:9876"] {
+                    }                    // 2. Connect Wi-Fi Direct channel with bonded sockets
+                    for hotspot_ip in &[
+                        "10.18.163.1:9876",
+                        "10.18.163.2:9876",
+                        "10.18.163.130:9876",
+                        "10.78.112.40:9876",
+                        "192.168.43.1:9876",
+                        "192.168.43.2:9876",
+                        "192.168.137.1:9876",
+                        "192.168.1.19:9876",
+                    ] {
                         let mut connected_any = false;
                         for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                             if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(500), TcpTransport::connect(hotspot_ip)).await {
@@ -447,13 +454,13 @@ pub async fn start_transfer(
                             if !trimmed.is_empty() {
                                 let is_usb = trimmed.contains("127.0.0.1") || trimmed.contains("localhost") || trimmed.contains("usb");
                                 if is_usb {
-                                    if let Ok(t) = TcpTransport::connect(trimmed).await {
+                                    if let Ok(Ok(t)) = tokio::time::timeout(tokio::time::Duration::from_millis(800), TcpTransport::connect(trimmed)).await {
                                         transports.push((Box::new(t), true));
                                         transport_names.push("USB (ADB Tunnel)".to_string());
                                     }
                                 } else {
                                     for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
-                                        if let Ok(t) = TcpTransport::connect(trimmed).await {
+                                        if let Ok(Ok(t)) = tokio::time::timeout(tokio::time::Duration::from_millis(800), TcpTransport::connect(trimmed)).await {
                                             transports.push((Box::new(t), false));
                                             transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
                                         }
@@ -464,13 +471,13 @@ pub async fn start_transfer(
                     } else {
                         let is_usb = explicit_addr.contains("127.0.0.1") || explicit_addr.contains("localhost") || explicit_addr.contains("usb");
                         if is_usb {
-                            if let Ok(t) = TcpTransport::connect(explicit_addr).await {
+                            if let Ok(Ok(t)) = tokio::time::timeout(tokio::time::Duration::from_millis(800), TcpTransport::connect(explicit_addr)).await {
                                 transports.push((Box::new(t), true));
                                 transport_names.push("USB (ADB Tunnel)".to_string());
                             }
                         } else {
                             for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
-                                if let Ok(t) = TcpTransport::connect(explicit_addr).await {
+                                if let Ok(Ok(t)) = tokio::time::timeout(tokio::time::Duration::from_millis(800), TcpTransport::connect(explicit_addr)).await {
                                     transports.push((Box::new(t), false));
                                     transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
                                 }
@@ -489,8 +496,32 @@ pub async fn start_transfer(
                                 transport_names.push("USB ADB Reverse Tunnel".to_string());
                             }
                         }
-                        // Probe Wi-Fi Direct / Hotspot gateway
-                        for hotspot_ip in &["10.18.163.130:9876", "192.168.43.2:9876", "192.168.43.1:9876"] {
+                        // Probe Wi-Fi Direct / Hotspot gateway and ARP peers
+                        let mut probe_ips: Vec<String> = vec![
+                            "10.18.163.1:9876".to_string(),
+                            "10.18.163.2:9876".to_string(),
+                            "10.18.163.130:9876".to_string(),
+                            "10.78.112.40:9876".to_string(),
+                            "192.168.43.1:9876".to_string(),
+                            "192.168.43.2:9876".to_string(),
+                            "192.168.137.1:9876".to_string(),
+                            "192.168.1.19:9876".to_string(),
+                        ];
+                        if let Ok(arp_content) = std::fs::read_to_string("/proc/net/arp") {
+                            for line in arp_content.lines().skip(1) {
+                                let parts: Vec<&str> = line.split_whitespace().collect();
+                                if let Some(ip) = parts.first() {
+                                    if !ip.is_empty() && ip.contains('.') {
+                                        let addr = format!("{}:9876", ip);
+                                        if !probe_ips.contains(&addr) {
+                                            probe_ips.push(addr);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        for hotspot_ip in &probe_ips {
                             let mut connected_any = false;
                             for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                                 if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(500), TcpTransport::connect(hotspot_ip)).await {
@@ -519,7 +550,15 @@ pub async fn start_transfer(
                         }
 
                         // If USB is already connected or probe hotspot, connect Wi-Fi with bonded streams
-                        for hotspot_ip in &["10.18.163.130:9876", "192.168.43.1:9876", "192.168.43.2:9876"] {
+                        for hotspot_ip in &[
+                            "10.18.163.1:9876",
+                            "10.18.163.2:9876",
+                            "10.18.163.130:9876",
+                            "10.78.112.40:9876",
+                            "192.168.43.1:9876",
+                            "192.168.43.2:9876",
+                            "192.168.137.1:9876",
+                        ] {
                             let mut connected_any = false;
                             for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                                 if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(400), TcpTransport::connect(hotspot_ip)).await {
@@ -538,10 +577,20 @@ pub async fn start_transfer(
                 }
 
                 if transports.is_empty() {
-                    let t = TcpTransport::connect(addr).await?;
-                    let is_usb = addr.contains("127.0.0.1") || addr.contains("localhost");
-                    transports.push((Box::new(t), is_usb));
-                    transport_names.push("TCP Transport".to_string());
+                    // addr may be comma-separated (e.g. "127.0.0.1:9876,10.18.163.1:9876");
+                    // try each component individually instead of passing raw to connect
+                    let fallback_addrs: Vec<&str> = addr.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+                    for fallback_addr in &fallback_addrs {
+                        if let Ok(Ok(t)) = tokio::time::timeout(
+                            tokio::time::Duration::from_millis(800),
+                            TcpTransport::connect(fallback_addr),
+                        ).await {
+                            let is_usb = fallback_addr.contains("127.0.0.1") || fallback_addr.contains("localhost");
+                            transports.push((Box::new(t), is_usb));
+                            transport_names.push("TCP Transport".to_string());
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -549,6 +598,7 @@ pub async fn start_transfer(
     }.await;
 
     if let Err(e) = connect_res {
+        log::error!("start_transfer connection failure: {}", e);
         if let Some(telemetry) = crate::util::telemetry::get_telemetry(transfer_id) {
             telemetry.mark_failed(&e.to_string());
             let data_dir = default_data_dir();
@@ -563,6 +613,7 @@ pub async fn start_transfer(
     } else {
         transport_names.into_iter().next().unwrap_or_else(|| "TCP Transport".to_string())
     };
+    log::info!("start_transfer connected successfully via {}", transport_name);
 
     update_transfer_transport_name(transfer_id, transport_name);
 
@@ -1116,19 +1167,28 @@ async fn handle_incoming_receive_transport(
 /// Stops a named listener, or every listener when no address is supplied.
 pub fn leave_receive_mode(address: Option<&str>) -> bool {
     let mut listeners = get_receive_listeners().lock().unwrap();
+    let had_listeners;
     if let Some(addr) = address {
         if let Some(listener) = listeners.remove(addr) {
             listener.abort.abort();
-            return true;
+            had_listeners = true;
+        } else {
+            had_listeners = false;
         }
-        false
     } else {
-        let empty = listeners.is_empty();
+        had_listeners = !listeners.is_empty();
         for (_, listener) in listeners.drain() {
             listener.abort.abort();
         }
-        !empty
     }
+
+    // Clean up ADB tunnels to prevent server deadlock from stale forward/reverse rules
+    #[cfg(not(target_os = "android"))]
+    if had_listeners {
+        UsbTransport::cleanup_all_default_adb_tunnels(None);
+    }
+
+    had_listeners
 }
 
 /// Pauses an active transfer (§7).
@@ -1339,7 +1399,7 @@ pub fn get_progress(transfer_id: Uuid) -> Option<TransferProgress> {
 
     if !is_terminal {
         let delta_t = now.duration_since(*last_time).as_secs_f64();
-        if delta_t >= 0.20 {
+        if delta_t >= 0.30 {
             let delta_b = bytes.saturating_sub(*last_bytes) as f64;
             let delta_usb = usb_bytes.saturating_sub(*last_usb_bytes) as f64;
             let delta_wifi = wifi_bytes.saturating_sub(*last_wifi_bytes) as f64;
@@ -1348,9 +1408,19 @@ pub fn get_progress(transfer_id: Uuid) -> Option<TransferProgress> {
             let inst_usb_bps = delta_usb / delta_t;
             let inst_wifi_bps = delta_wifi / delta_t;
 
-            *rolling = if *rolling == 0.0 { inst_bps } else { *rolling * 0.35 + inst_bps * 0.65 };
-            *rolling_usb = if *rolling_usb == 0.0 { inst_usb_bps } else { *rolling_usb * 0.35 + inst_usb_bps * 0.65 };
-            *rolling_wifi = if *rolling_wifi == 0.0 { inst_wifi_bps } else { *rolling_wifi * 0.35 + inst_wifi_bps * 0.65 };
+            let elapsed = now.duration_since(record.start_time).as_secs_f64();
+            let session_avg_bps = if elapsed > 0.2 { (bytes as f64) / elapsed } else { inst_bps };
+
+            // Smooth instantaneous measurement and bound against session average to prevent chunk-completion spikes
+            let bounded_inst = if session_avg_bps > 0.0 && bytes > 0 {
+                inst_bps.min(session_avg_bps * 1.6).max(session_avg_bps * 0.4)
+            } else {
+                inst_bps
+            };
+
+            *rolling = if *rolling == 0.0 { bounded_inst } else { *rolling * 0.70 + bounded_inst * 0.30 };
+            *rolling_usb = if *rolling_usb == 0.0 { inst_usb_bps } else { *rolling_usb * 0.70 + inst_usb_bps * 0.30 };
+            *rolling_wifi = if *rolling_wifi == 0.0 { inst_wifi_bps } else { *rolling_wifi * 0.70 + inst_wifi_bps * 0.30 };
 
             *last_time = now;
             *last_bytes = bytes;
@@ -1362,15 +1432,15 @@ pub fn get_progress(transfer_id: Uuid) -> Option<TransferProgress> {
     let (throughput, usb_speed, wifi_speed) = if status == TransferStatus::Completed {
         let mut end_time = record.end_time.lock().unwrap();
         let end_instant = *end_time.get_or_insert(now);
-        let elapsed = end_instant.duration_since(record.start_time).as_secs_f64();
+        let elapsed = end_instant.duration_since(record.start_time).as_secs_f64().max(0.05);
+        let avg = (bytes as f64) / elapsed;
         if (usb_bytes > 0 || wifi_bytes > 0) && elapsed > 0.05 {
             (
-                (bytes as f64) / elapsed,
+                avg,
                 (usb_bytes as f64) / elapsed,
                 (wifi_bytes as f64) / elapsed,
             )
-        } else if elapsed > 0.05 {
-            let avg = (bytes as f64) / elapsed;
+        } else {
             let is_usb = record.transport_name.contains("USB") || record.transport_name.contains("ADB") || record.transport_name.contains("127.0.0.1");
             let is_wifi = record.transport_name.contains("Wi-Fi") || record.transport_name.contains("Hotspot") || record.transport_name.contains("P2P") || record.transport_name.contains("10.18.") || record.transport_name.contains("192.168.");
             if is_usb && is_wifi {
@@ -1380,8 +1450,6 @@ pub fn get_progress(transfer_id: Uuid) -> Option<TransferProgress> {
             } else {
                 (avg, avg, 0.0)
             }
-        } else {
-            (0.0, 0.0, 0.0)
         }
     } else {
         // If channel counters were recorded, use them; otherwise fall back to transport name heuristics
@@ -1583,14 +1651,12 @@ pub fn get_transfers() -> Vec<TransferSummary> {
         );
     }
 
-    // 2. Scan disk metadata files
+    // 2. Scan disk metadata files (only .meta.json, ignore large telemetry .json logs)
     let dir = default_data_dir();
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("json")
-                || path.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.ends_with(".meta.json"))
-            {
+            if path.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.ends_with(".meta.json")) {
                 if let Ok(content) = std::fs::read_to_string(&path) {
                     if let Ok(meta) = serde_json::from_str::<crate::manifest::TransferMeta>(&content) {
                         summaries.entry(meta.transfer_id).or_insert_with(|| {

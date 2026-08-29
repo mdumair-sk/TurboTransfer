@@ -1,5 +1,6 @@
 package com.turbotransfer.data.source.rust
 
+import android.util.Log
 import com.turbotransfer.core.common.DispatcherProvider
 import com.turbotransfer.domain.model.TransferProgressInfo
 import com.turbotransfer.domain.model.TransferStatus
@@ -20,6 +21,7 @@ class RustCoreDataSource @Inject constructor(
         address: String? = null
     ): Result<String> = withContext(dispatcherProvider.io) {
         try {
+            Log.i("TurboTransfer", "RustCoreDataSource: starting transfer for path=$filePath, address=$address")
             val handle = uniffi.turbotransfer_core.startTransfer(
                 filePath = filePath,
                 fileName = fileName,
@@ -27,8 +29,10 @@ class RustCoreDataSource @Inject constructor(
                 transportPref = transportPref,
                 address = address?.ifBlank { null }
             )
+            Log.i("TurboTransfer", "RustCoreDataSource: startTransfer SUCCESS transferId=${handle.transferId}")
             Result.success(handle.transferId)
         } catch (e: Exception) {
+            Log.e("TurboTransfer", "RustCoreDataSource: startTransfer FAILED for path=$filePath, address=$address: ${e.message}", e)
             Result.failure(e)
         }
     }

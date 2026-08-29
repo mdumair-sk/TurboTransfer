@@ -362,31 +362,40 @@ impl UsbTransport {
         std::path::PathBuf::from("adb")
     }
 
+    /// Executes an ADB command with detached stdio and no window to prevent deadlocks and hanging on Windows.
+    pub fn run_adb_cmd(args: &[&str]) -> Result<std::process::Output, TransportError> {
+        let adb_path = Self::get_adb_path();
+        let mut cmd = Command::new(&adb_path);
+        cmd.args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+
+        cmd.output().map_err(|e| TransportError::Other(format!("Failed to execute '{:?} {:?}': {}", adb_path, args, e)))
+    }
+
     /// Lists connected ADB devices by running `adb devices -l`.
     pub fn list_adb_devices() -> Result<Vec<AdbDeviceInfo>, TransportError> {
-        let adb_path = Self::get_adb_path();
-        let output = Command::new(&adb_path)
-            .args(["devices", "-l"])
-            .output()
-            .map_err(|e| TransportError::Other(format!("Failed to execute '{:?} devices -l': {}", adb_path, e)))?;
-
+        let output = Self::run_adb_cmd(&["devices", "-l"])?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         Ok(AdbDeviceInfo::parse_adb_devices_output(&stdout))
     }
 
     /// Sets up ADB forward rule for a specific device.
     pub fn setup_adb_forward(serial: &str, local_port: u16, remote_port: u16) -> Result<(), TransportError> {
-        let adb_path = Self::get_adb_path();
-        let output = Command::new(&adb_path)
-            .args([
-                "-s",
-                serial,
-                "forward",
-                &format!("tcp:{}", local_port),
-                &format!("tcp:{}", remote_port),
-            ])
-            .output()
-            .map_err(|e| TransportError::Other(format!("Failed to execute '{:?} forward': {}", adb_path, e)))?;
+        let output = Self::run_adb_cmd(&[
+            "-s",
+            serial,
+            "forward",
+            &format!("tcp:{}", local_port),
+            &format!("tcp:{}", remote_port),
+        ])?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -399,27 +408,20 @@ impl UsbTransport {
 
     /// Removes ADB forward rule for a specific device.
     pub fn remove_adb_forward(serial: &str, local_port: u16) -> Result<(), TransportError> {
-        let adb_path = Self::get_adb_path();
-        let _ = Command::new(&adb_path)
-            .args(["-s", serial, "forward", "--remove", &format!("tcp:{}", local_port)])
-            .output();
+        let _ = Self::run_adb_cmd(&["-s", serial, "forward", "--remove", &format!("tcp:{}", local_port)]);
         debug!("Removed adb forward tcp:{} for {}", local_port, serial);
         Ok(())
     }
 
     /// Sets up ADB reverse rule so Android can connect to Windows host.
     pub fn setup_adb_reverse(serial: &str, remote_port: u16, local_port: u16) -> Result<(), TransportError> {
-        let adb_path = Self::get_adb_path();
-        let output = Command::new(&adb_path)
-            .args([
-                "-s",
-                serial,
-                "reverse",
-                &format!("tcp:{}", remote_port),
-                &format!("tcp:{}", local_port),
-            ])
-            .output()
-            .map_err(|e| TransportError::Other(format!("Failed to execute '{:?} reverse': {}", adb_path, e)))?;
+        let output = Self::run_adb_cmd(&[
+            "-s",
+            serial,
+            "reverse",
+            &format!("tcp:{}", remote_port),
+            &format!("tcp:{}", local_port),
+        ])?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -430,50 +432,69 @@ impl UsbTransport {
         Ok(())
     }
 
-    /// Configures all required ADB reverse and forward tunnels for data and direct hotspot discovery.
-    pub fn setup_default_adb_tunnels(serial: &str) -> Result<(), TransportError> {
+    /// Configures ADB reverse tunnel for receiving files from Android and forward tunnel for hotspot metadata.
+    pub fn setup_receive_adb_tunnels(serial: &str) -> Result<(), TransportError> {
+        // Ensure no conflicting forward rule on 9876 exists
+        let _ = Self::remove_adb_forward(serial, 9876);
         let _ = Self::setup_adb_reverse(serial, 9876, 9876);
         let _ = Self::setup_adb_forward(serial, 9875, 9875);
-        let _ = Self::remove_adb_forward(serial, 9876);
         Ok(())
+    }
+
+    /// Configures all required ADB reverse and forward tunnels for data and direct hotspot discovery.
+    pub fn setup_default_adb_tunnels(serial: &str) -> Result<(), TransportError> {
+        Self::setup_receive_adb_tunnels(serial)
+    }
+
+    /// Removes all default ADB forward and reverse tunnels for a device (or all devices if serial is None).
+    /// Must be called on TUI exit / leave_receive_mode to prevent ADB server deadlock from
+    /// circular forward+reverse rules on port 9876.
+    pub fn cleanup_all_default_adb_tunnels(serial: Option<&str>) {
+        let serials: Vec<String> = if let Some(s) = serial {
+            vec![s.to_string()]
+        } else {
+            Self::list_adb_devices()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|d| d.state == "device")
+                .map(|d| d.serial)
+                .collect()
+        };
+
+        for s in &serials {
+            let _ = Self::remove_adb_forward(s, 9876);
+            let _ = Self::remove_adb_forward(s, 9875);
+            let _ = Self::remove_adb_reverse(s, 9876);
+            debug!("Cleaned up all default ADB tunnels for device {}", s);
+        }
     }
 
     /// Triggers the Android app to spin up its 5 GHz Local-Only Hotspot via ADB broadcast.
     pub fn trigger_android_hotspot(serial: &str) -> Result<(), TransportError> {
-        let adb_path = Self::get_adb_path();
-        let _ = Command::new(&adb_path)
-            .args(["-s", serial, "shell", "am", "broadcast", "-a", "com.turbotransfer.START_HOTSPOT"])
-            .output();
+        let _ = Self::run_adb_cmd(&["-s", serial, "shell", "am", "broadcast", "-a", "com.turbotransfer.START_HOTSPOT"]);
         debug!("Triggered START_HOTSPOT broadcast on device {}", serial);
         Ok(())
     }
 
-    /// Triggers the Android app to enter Receive mode via ADB broadcast.
+    /// Triggers the Android app to enter Receive mode via ADB broadcast and foreground launch.
     pub fn trigger_android_receive(serial: &str) -> Result<(), TransportError> {
-        let adb_path = Self::get_adb_path();
-        let _ = Command::new(&adb_path)
-            .args(["-s", serial, "shell", "am", "broadcast", "-a", "com.turbotransfer.ENTER_RECEIVE"])
-            .output();
+        // First ensure MainActivity is launched/resumed
+        let _ = Self::run_adb_cmd(&["-s", serial, "shell", "am", "start", "-n", "com.turbotransfer/.MainActivity"]);
+        let _ = Self::run_adb_cmd(&["-s", serial, "shell", "am", "broadcast", "-a", "com.turbotransfer.ENTER_RECEIVE"]);
         debug!("Triggered ENTER_RECEIVE broadcast on device {}", serial);
         Ok(())
     }
 
     /// Triggers the Android app to stop hotspot via ADB broadcast.
     pub fn trigger_android_stop_hotspot(serial: &str) -> Result<(), TransportError> {
-        let adb_path = Self::get_adb_path();
-        let _ = Command::new(&adb_path)
-            .args(["-s", serial, "shell", "am", "broadcast", "-a", "com.turbotransfer.STOP_HOTSPOT"])
-            .output();
+        let _ = Self::run_adb_cmd(&["-s", serial, "shell", "am", "broadcast", "-a", "com.turbotransfer.STOP_HOTSPOT"]);
         debug!("Triggered STOP_HOTSPOT broadcast on device {}", serial);
         Ok(())
     }
 
     /// Removes ADB reverse rule for a specific device.
     pub fn remove_adb_reverse(serial: &str, remote_port: u16) -> Result<(), TransportError> {
-        let adb_path = Self::get_adb_path();
-        let _ = Command::new(&adb_path)
-            .args(["-s", serial, "reverse", "--remove", &format!("tcp:{}", remote_port)])
-            .output();
+        let _ = Self::run_adb_cmd(&["-s", serial, "reverse", "--remove", &format!("tcp:{}", remote_port)]);
         debug!("Removed adb reverse tcp:{} for {}", remote_port, serial);
         Ok(())
     }
@@ -539,12 +560,20 @@ impl UsbTransport {
     }
 
     /// Probes if the target ADB device is actively running a TurboTransfer receiver on the specified port.
+    /// Uses graceful shutdown to avoid sending TCP RST packets that can crash the ADB server daemon.
     pub fn is_receiver_listening(serial: &str, port: u16) -> bool {
         let _ = Self::setup_adb_forward(serial, port, port);
-        std::net::TcpStream::connect_timeout(
+        match std::net::TcpStream::connect_timeout(
             &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
             Duration::from_millis(150),
-        ).is_ok()
+        ) {
+            Ok(stream) => {
+                // Graceful shutdown to avoid RST storm in ADB server
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+                true
+            }
+            Err(_) => false,
+        }
     }
 
     /// Returns the verified peer device info if handshake completed.
@@ -606,7 +635,7 @@ impl UsbTransport {
         )))
     }
 
-    /// Cleans up the forwarded ADB port rule.
+    /// Cleans up all ADB tunnel rules associated with this transport instance.
     pub fn cleanup_tunnel(&self) {
         if self.cleaned_up.swap(true, Ordering::SeqCst) {
             return;
@@ -614,6 +643,11 @@ impl UsbTransport {
 
         if let Some(serial) = &self.active_serial {
             let _ = Self::remove_adb_forward(serial, self.config.local_port);
+            let _ = Self::remove_adb_reverse(serial, self.config.remote_port);
+            // Also clean up the hotspot metadata channel if it was on the default port
+            if self.config.local_port == 9876 {
+                let _ = Self::remove_adb_forward(serial, 9875);
+            }
         }
     }
 }
