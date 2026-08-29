@@ -128,4 +128,45 @@ class RustCoreDataSource @Inject constructor(
             Result.failure(e)
         }
     }
+
+    suspend fun getTransferBottleneckReport(transferId: String): FfiBottleneckReport? = withContext(dispatcherProvider.io) {
+        try {
+            uniffi.turbotransfer_core.getTransferBottleneckReport(transferId)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    suspend fun getTransferLogs(transferId: String, maxEvents: Long? = null): List<FfiTransferEvent> = withContext(dispatcherProvider.io) {
+        try {
+            uniffi.turbotransfer_core.getTransferLogs(transferId, maxEvents?.toUInt())
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun getTransferLogJson(transferId: String): String = withContext(dispatcherProvider.io) {
+        try {
+            uniffi.turbotransfer_core.getTransferLogJson(transferId)
+        } catch (e: Exception) {
+            "{}"
+        }
+    }
+
+    suspend fun listTransferLogs(): List<FfiTransferLogSummary> = withContext(dispatcherProvider.io) {
+        try {
+            uniffi.turbotransfer_core.listTransferLogs()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun exportTransferLogs(transferId: String, outputDir: String? = null): Result<String> = withContext(dispatcherProvider.io) {
+        try {
+            val path = uniffi.turbotransfer_core.exportTransferLogs(transferId, outputDir)
+            Result.success(path)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }

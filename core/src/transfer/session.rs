@@ -5,7 +5,8 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use uuid::Uuid;
 
 use super::api::{
-    register_active_transfer, set_transfer_status, transfer_control_status, update_transfer_progress,
+    default_data_dir, register_active_transfer, set_transfer_status, transfer_control_status,
+    update_transfer_progress,
 };
 use super::tracker::ChunkTracker;
 use crate::checksum::{compute_file_crc32c, compute_xxhash64};
@@ -16,6 +17,10 @@ use crate::protocol::{
     HelloData, Message, ProtocolError, TransferAcceptData, TransferOfferData,
 };
 use crate::transport::{StreamTransport, Transport, TransportError, TransportKind};
+use crate::util::telemetry::{
+    export_and_clean_telemetry, get_or_create_telemetry, EventLevel, TransferStage,
+    TransferTelemetry,
+};
 
 #[derive(Error, Debug)]
 pub enum TransferSessionError {
@@ -66,16 +71,25 @@ fn handle_ack_frame(
     frame: Message,
     is_usb: bool,
     in_flight: &mut std::collections::HashSet<u32>,
+    in_flight_times: &mut std::collections::HashMap<u32, std::time::Instant>,
     completed_set: &mut std::collections::HashSet<u32>,
     plan_map: &std::collections::HashMap<u32, crate::chunk::ChunkPlanEntry>,
     retry_tx: &std::sync::mpsc::Sender<crate::chunk::ChunkPlanEntry>,
     transfer_id: Uuid,
     bytes_sent_total: &mut u64,
     completed_chunks_count: &mut u32,
+    telemetry: Option<&TransferTelemetry>,
+    channel_name: &str,
 ) -> Result<(), TransferSessionError> {
     match frame {
         Message::ChunkAck(ack) => {
             in_flight.remove(&ack.chunk_id);
+            if let Some(t_disp) = in_flight_times.remove(&ack.chunk_id) {
+                let rtt_ms = t_disp.elapsed().as_secs_f64() * 1000.0;
+                if let Some(tel) = telemetry {
+                    tel.record_chunk_ack(channel_name, ack.chunk_id, rtt_ms);
+                }
+            }
             if completed_set.insert(ack.chunk_id) {
                 if let Some(entry) = plan_map.get(&ack.chunk_id) {
                     *bytes_sent_total += entry.payload_length as u64;
@@ -92,6 +106,12 @@ fn handle_ack_frame(
         Message::BatchChunkAck(batch) => {
             for cid in batch.chunk_ids {
                 in_flight.remove(&cid);
+                if let Some(t_disp) = in_flight_times.remove(&cid) {
+                    let rtt_ms = t_disp.elapsed().as_secs_f64() * 1000.0;
+                    if let Some(tel) = telemetry {
+                        tel.record_chunk_ack(channel_name, cid, rtt_ms);
+                    }
+                }
                 if completed_set.insert(cid) {
                     if let Some(entry) = plan_map.get(&cid) {
                         *bytes_sent_total += entry.payload_length as u64;
@@ -108,6 +128,10 @@ fn handle_ack_frame(
         }
         Message::ChunkNack(nack) => {
             in_flight.remove(&nack.chunk_id);
+            in_flight_times.remove(&nack.chunk_id);
+            if let Some(tel) = telemetry {
+                tel.record_chunk_nack(channel_name, nack.chunk_id, &nack.reason);
+            }
             if let Some(entry) = plan_map.get(&nack.chunk_id) {
                 let _ = retry_tx.send(entry.clone());
             }
@@ -121,6 +145,7 @@ fn handle_ack_frame(
     }
     Ok(())
 }
+
 
 /// Runs the sender side of a transfer session over any generic `Transport` (§6, §7, §8, §9).
 /// Implements a high-throughput sliding window pipeline with concurrent in-flight chunks.
@@ -137,6 +162,22 @@ pub async fn send_file_session<T>(
 where
     T: Transport,
 {
+    let manifest = generate_manifest_with_name(file_path, chunk_size, custom_file_name)?;
+    let telemetry = get_or_create_telemetry(transfer_id, &manifest.file_name, manifest.file_size, TransferRole::Sender);
+    let is_usb = is_usb_channel.unwrap_or_else(|| transport.kind() == crate::transport::TransportKind::Usb);
+    let ch_name = if is_usb { "USB" } else { "Wi-Fi" };
+
+    telemetry.record_event(
+        TransferStage::Handshake,
+        EventLevel::Info,
+        ch_name,
+        None,
+        None,
+        None,
+        format!("Sending Hello handshake to peer (sender: {})", sender_device_name),
+        None,
+    );
+
     // 1. Handshake: Send Hello
     let hello = Message::Hello(HelloData {
         device_id: sender_device_id,
@@ -159,18 +200,39 @@ where
         )));
     }
 
+    telemetry.record_event(
+        TransferStage::Handshake,
+        EventLevel::Info,
+        ch_name,
+        None,
+        None,
+        None,
+        format!("Received Hello from peer: {:?}", peer_hello),
+        None,
+    );
+
     // 3. Send TransferOffer
-    let manifest = generate_manifest_with_name(file_path, chunk_size, custom_file_name)?;
     let offer = Message::TransferOffer(TransferOfferData {
         transfer_id,
         file_id: manifest.file_id,
-        file_name: manifest.file_name,
+        file_name: manifest.file_name.clone(),
         file_size: manifest.file_size,
         chunk_size: manifest.chunk_size,
         total_chunks: manifest.total_chunks,
         checksum_algo: "xxhash64".to_string(),
     });
     transport.send_frame(&offer).await?;
+
+    telemetry.record_event(
+        TransferStage::Handshake,
+        EventLevel::Info,
+        ch_name,
+        None,
+        None,
+        Some(manifest.file_size),
+        format!("Sent TransferOffer: '{}' ({} bytes, {} chunks of {} bytes)", manifest.file_name, manifest.file_size, manifest.total_chunks, manifest.chunk_size),
+        None,
+    );
 
     // 4. Await TransferAccept / TransferReject
     let response = transport
@@ -181,8 +243,30 @@ where
         ))?;
 
     let resume_ranges = match response {
-        Message::TransferAccept(accept) => accept.resume_from,
+        Message::TransferAccept(accept) => {
+            telemetry.record_event(
+                TransferStage::Handshake,
+                EventLevel::Info,
+                ch_name,
+                None,
+                None,
+                None,
+                format!("Received TransferAccept (resume ranges: {:?})", accept.resume_from),
+                None,
+            );
+            accept.resume_from
+        }
         Message::TransferReject(reject) => {
+            telemetry.record_event(
+                TransferStage::Handshake,
+                EventLevel::Error,
+                ch_name,
+                None,
+                None,
+                None,
+                format!("Transfer rejected by peer: {}", reject.reason),
+                None,
+            );
             return Err(TransferSessionError::Rejected(reject.reason))
         }
         other => {
@@ -224,8 +308,8 @@ where
     }
 
     let mut in_flight: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    let mut in_flight_times: std::collections::HashMap<u32, std::time::Instant> = std::collections::HashMap::new();
     let total_chunks_needed = plan_map.len();
-    let is_usb = is_usb_channel.unwrap_or_else(|| transport.kind() == crate::transport::TransportKind::Usb);
     let (running_crc_tx, running_crc_rx) = tokio::sync::oneshot::channel::<u32>();
     let total_plan_chunks = plan_map.len();
 
@@ -241,6 +325,7 @@ where
         let mut pending_reader_chunks = chunks_to_send;
         let resume_ranges_cloned = resume_ranges.clone();
         let plan_map_for_reader = plan_map.clone();
+        let tel_reader = telemetry.clone();
 
         let reader_handle = tokio::task::spawn_blocking(move || -> Result<(), std::io::Error> {
             let mut file = crate::util::storage::open_sequential_read(&reader_file_path)?;
@@ -294,13 +379,19 @@ where
                 buf.resize(entry.payload_length as usize, 0);
 
                 use std::io::Seek;
+                let t_r0 = std::time::Instant::now();
                 file.seek(std::io::SeekFrom::Start(entry.file_offset))?;
                 crate::chunk::read_chunk_into_slice(&mut file, entry.file_offset, &mut buf)?;
+                let read_us = t_r0.elapsed().as_micros() as u64;
 
+                let t_h0 = std::time::Instant::now();
                 let chunk_crc = crate::checksum::compute_crc32c(&buf);
                 chunk_crc_map.insert(entry.chunk_id, (chunk_crc, buf.len()));
-
                 let checksum = compute_xxhash64(&buf);
+                let hash_us = t_h0.elapsed().as_micros() as u64;
+
+                tel_reader.record_chunk_read(entry.chunk_id, entry.payload_length as u64, read_us, hash_us);
+
                 if chunk_tx.blocking_send(PreparedChunk { entry, payload: buf, checksum }).is_err() {
                     break;
                 }
@@ -326,10 +417,12 @@ where
             match transfer_control_status(transfer_id) {
                 Some(TransferStatus::Paused) => {
                     is_cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+                    telemetry.record_event(TransferStage::Control, EventLevel::Info, ch_name, None, None, None, "Transfer paused by user", None);
                     return Err(TransferSessionError::Paused);
                 }
                 Some(TransferStatus::Cancelled) => {
                     is_cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+                    telemetry.record_event(TransferStage::Control, EventLevel::Info, ch_name, None, None, None, "Transfer cancelled by user", None);
                     return Err(TransferSessionError::Cancelled);
                 }
                 _ => {}
@@ -345,18 +438,23 @@ where
                                     frame,
                                     is_usb,
                                     &mut in_flight,
+                                    &mut in_flight_times,
                                     &mut completed_set,
                                     &plan_map,
                                     &retry_tx,
                                     transfer_id,
                                     &mut bytes_sent_total,
                                     &mut completed_chunks_count,
+                                    Some(&telemetry),
+                                    ch_name,
                                 )?;
                             }
                             Ok(None) => {
+                                telemetry.record_channel_disconnect(ch_name, "EOF while waiting for ChunkAck");
                                 return Err(TransferSessionError::UnexpectedMessage("EOF while waiting for ChunkAck".into()));
                             }
                             Err(e) => {
+                                telemetry.record_channel_disconnect(ch_name, &e.to_string());
                                 return Err(TransferSessionError::Transport(e));
                             }
                         }
@@ -379,7 +477,12 @@ where
                                 payload: prepared.payload,
                             });
 
+                            let t_s0 = std::time::Instant::now();
                             transport.send_frame(&chunk_msg).await?;
+                            let send_us = t_s0.elapsed().as_micros() as u64;
+                            telemetry.record_chunk_sent(ch_name, chunk_id, payload_len as u64, send_us);
+                            in_flight_times.insert(chunk_id, std::time::Instant::now());
+
                             if let Message::ChunkData(d) = chunk_msg {
                                 let _ = recycle_tx.send(d.payload);
                             }
@@ -390,18 +493,22 @@ where
             } else {
                 // Pipeline full -> await ACK from receiver to free slot
                 let frame = transport.receive_frame().await?.ok_or_else(|| {
+                    telemetry.record_channel_disconnect(ch_name, "EOF while waiting for ChunkAck with full pipeline");
                     TransferSessionError::UnexpectedMessage("EOF while waiting for ChunkAck".into())
                 })?;
                 handle_ack_frame(
                     frame,
                     is_usb,
                     &mut in_flight,
+                    &mut in_flight_times,
                     &mut completed_set,
                     &plan_map,
                     &retry_tx,
                     transfer_id,
                     &mut bytes_sent_total,
                     &mut completed_chunks_count,
+                    Some(&telemetry),
+                    ch_name,
                 )?;
             }
         }
@@ -414,6 +521,7 @@ where
     }
 
     // 6. Complete transfer
+    let t_fin0 = std::time::Instant::now();
     let file_checksum = match running_crc_rx.await {
         Ok(c) => c,
         Err(_) => compute_file_crc32c(file_path)?,
@@ -494,6 +602,12 @@ where
         }
     }
 
+    let fin_ms = t_fin0.elapsed().as_millis() as u64;
+    telemetry.record_finalize(fin_ms, true);
+    telemetry.mark_completed();
+    let data_dir = default_data_dir();
+    export_and_clean_telemetry(transfer_id, &data_dir);
+
     Ok(())
 }
 
@@ -501,6 +615,7 @@ async fn handle_multipath_ack_frame(
     frame: Message,
     is_usb: bool,
     worker_in_flight: &mut std::collections::HashSet<u32>,
+    worker_in_flight_times: &mut std::collections::HashMap<u32, std::time::Instant>,
     completed: &std::sync::Arc<parking_lot::Mutex<std::collections::HashSet<u32>>>,
     completed_count: &std::sync::Arc<std::sync::atomic::AtomicUsize>,
     plan_map: &std::collections::HashMap<u32, crate::chunk::ChunkPlanEntry>,
@@ -508,10 +623,18 @@ async fn handle_multipath_ack_frame(
     transfer_id: Uuid,
     bytes_sent: &std::sync::Arc<std::sync::atomic::AtomicU64>,
     chunks_done: &std::sync::Arc<std::sync::atomic::AtomicU32>,
+    telemetry: Option<&std::sync::Arc<TransferTelemetry>>,
+    channel_name: &str,
 ) -> Result<(), TransferSessionError> {
     match frame {
         Message::ChunkAck(ack) => {
             worker_in_flight.remove(&ack.chunk_id);
+            if let Some(t_disp) = worker_in_flight_times.remove(&ack.chunk_id) {
+                let rtt_ms = t_disp.elapsed().as_secs_f64() * 1000.0;
+                if let Some(tel) = telemetry {
+                    tel.record_chunk_ack(channel_name, ack.chunk_id, rtt_ms);
+                }
+            }
             let is_new = completed.lock().insert(ack.chunk_id);
             if is_new {
                 completed_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -526,6 +649,12 @@ async fn handle_multipath_ack_frame(
         Message::BatchChunkAck(batch) => {
             for cid in batch.chunk_ids {
                 worker_in_flight.remove(&cid);
+                if let Some(t_disp) = worker_in_flight_times.remove(&cid) {
+                    let rtt_ms = t_disp.elapsed().as_secs_f64() * 1000.0;
+                    if let Some(tel) = telemetry {
+                        tel.record_chunk_ack(channel_name, cid, rtt_ms);
+                    }
+                }
                 let is_new = completed.lock().insert(cid);
                 if is_new {
                     completed_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -540,6 +669,10 @@ async fn handle_multipath_ack_frame(
         }
         Message::ChunkNack(nack) => {
             worker_in_flight.remove(&nack.chunk_id);
+            worker_in_flight_times.remove(&nack.chunk_id);
+            if let Some(tel) = telemetry {
+                tel.record_chunk_nack(channel_name, nack.chunk_id, &nack.reason);
+            }
             if let Some(entry) = plan_map.get(&nack.chunk_id) {
                 let _ = retry_tx.send(entry.clone());
             }
@@ -581,13 +714,26 @@ pub async fn send_file_session_multipath(
     }
 
     let manifest = generate_manifest_with_name(file_path, chunk_size, custom_file_name)?;
+    let telemetry = get_or_create_telemetry(transfer_id, &manifest.file_name, manifest.file_size, TransferRole::Sender);
     let plan = calculate_chunk_plan(manifest.file_size, manifest.chunk_size);
     let plan_map: std::collections::HashMap<u32, crate::chunk::ChunkPlanEntry> =
         plan.iter().map(|e| (e.chunk_id, e.clone())).collect();
 
+    telemetry.record_event(
+        TransferStage::Handshake,
+        EventLevel::Info,
+        "Multipath",
+        None,
+        None,
+        Some(manifest.file_size),
+        format!("Initiating multipath sender session with {} channels for '{}' ({} bytes)", transports.len(), manifest.file_name, manifest.file_size),
+        None,
+    );
+
     // 1. Perform Hello and TransferOffer handshakes across all transports
     let mut resume_ranges_combined: Vec<(u32, u32)> = Vec::new();
-    for (transport, _) in &mut transports {
+    for (idx, (transport, is_usb)) in transports.iter_mut().enumerate() {
+        let ch_name = if *is_usb { "USB" } else { "Wi-Fi" };
         let hello = Message::Hello(HelloData {
             device_id: sender_device_id,
             device_name: sender_device_name.to_string(),
@@ -624,11 +770,31 @@ pub async fn send_file_session_multipath(
 
         match response {
             Message::TransferAccept(accept) => {
+                telemetry.record_event(
+                    TransferStage::Handshake,
+                    EventLevel::Info,
+                    &format!("Channel-{}", idx + 1),
+                    None,
+                    None,
+                    None,
+                    format!("Channel-{} ({}) handshake accepted", idx + 1, ch_name),
+                    None,
+                );
                 if let Some(ranges) = accept.resume_from {
                     resume_ranges_combined.extend(ranges);
                 }
             }
             Message::TransferReject(reject) => {
+                telemetry.record_event(
+                    TransferStage::Handshake,
+                    EventLevel::Error,
+                    &format!("Channel-{}", idx + 1),
+                    None,
+                    None,
+                    None,
+                    format!("Channel-{} rejected: {}", idx + 1, reject.reason),
+                    None,
+                );
                 return Err(TransferSessionError::Rejected(reject.reason))
             }
             other => {
@@ -665,6 +831,7 @@ pub async fn send_file_session_multipath(
     let total_chunks_needed = initial_chunks_to_send.len();
     if total_chunks_needed == 0 {
         // All chunks already completed -> complete immediately
+        let t_fin0 = std::time::Instant::now();
         let file_checksum = compute_file_crc32c(file_path)?;
         let complete_msg = Message::Complete(CompleteData {
             transfer_id,
@@ -681,6 +848,11 @@ pub async fn send_file_session_multipath(
                 final_frame
             )));
         }
+        let fin_ms = t_fin0.elapsed().as_millis() as u64;
+        telemetry.record_finalize(fin_ms, true);
+        telemetry.mark_completed();
+        let data_dir = default_data_dir();
+        export_and_clean_telemetry(transfer_id, &data_dir);
         return Ok(());
     }
 
@@ -697,6 +869,7 @@ pub async fn send_file_session_multipath(
     let mut pending_reader_chunks = initial_chunks_to_send;
     let resume_ranges_cloned = resume_ranges_combined.clone();
     let plan_map_for_reader = plan_map.clone();
+    let tel_reader = telemetry.clone();
 
     let reader_handle = tokio::task::spawn_blocking(move || -> Result<(), std::io::Error> {
         let mut file = crate::util::storage::open_sequential_read(&reader_file_path)?;
@@ -760,13 +933,19 @@ pub async fn send_file_session_multipath(
             buf.resize(entry.payload_length as usize, 0);
 
             use std::io::Seek;
+            let t_r0 = std::time::Instant::now();
             file.seek(std::io::SeekFrom::Start(entry.file_offset))?;
             crate::chunk::read_chunk_into_slice(&mut file, entry.file_offset, &mut buf)?;
+            let read_us = t_r0.elapsed().as_micros() as u64;
 
+            let t_h0 = std::time::Instant::now();
             let chunk_crc = crate::checksum::compute_crc32c(&buf);
             chunk_crc_map.insert(entry.chunk_id, (chunk_crc, buf.len()));
-
             let checksum = compute_xxhash64(&buf);
+            let hash_us = t_h0.elapsed().as_micros() as u64;
+
+            tel_reader.record_chunk_read(entry.chunk_id, entry.payload_length as u64, read_us, hash_us);
+
             if prepared_tx.send_blocking(PreparedChunk { entry, payload: buf, checksum }).is_err() {
                 break;
             }
@@ -812,10 +991,17 @@ pub async fn send_file_session_multipath(
         let cancelled = std::sync::Arc::clone(&is_cancelled);
         let file_id = manifest.file_id;
         let total_chunks = plan.len();
+        let telemetry_worker = Some(telemetry.clone());
+        let channel_name = if is_usb {
+            "USB".to_string()
+        } else {
+            format!("WiFi-Stream-{}", idx + 1)
+        };
 
         let handle = tokio::spawn(async move {
             const WORKER_PIPELINE_DEPTH: usize = 16;
             let mut worker_in_flight = std::collections::HashSet::new();
+            let mut worker_in_flight_times = std::collections::HashMap::new();
 
             loop {
                 if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
@@ -837,11 +1023,17 @@ pub async fn send_file_session_multipath(
                     Some(TransferStatus::Paused) => {
                         cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
                         prepared_rx.close();
+                        if let Some(ref tel) = telemetry_worker {
+                            tel.record_event(TransferStage::Control, EventLevel::Info, &channel_name, None, None, None, "Transfer paused by user", None);
+                        }
                         return Err(TransferSessionError::Paused);
                     }
                     Some(TransferStatus::Cancelled) => {
                         cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
                         prepared_rx.close();
+                        if let Some(ref tel) = telemetry_worker {
+                            tel.record_event(TransferStage::Control, EventLevel::Info, &channel_name, None, None, None, "Transfer cancelled by user", None);
+                        }
                         return Err(TransferSessionError::Cancelled);
                     }
                     _ => {}
@@ -856,6 +1048,7 @@ pub async fn send_file_session_multipath(
                                     frame,
                                     is_usb,
                                     &mut worker_in_flight,
+                                    &mut worker_in_flight_times,
                                     &completed,
                                     &completed_count,
                                     &plan_map,
@@ -863,6 +1056,8 @@ pub async fn send_file_session_multipath(
                                     transfer_id,
                                     &bytes_sent,
                                     &chunks_done,
+                                    telemetry_worker.as_ref(),
+                                    &channel_name,
                                 ).await?;
                                 if completed_count.load(std::sync::atomic::Ordering::Relaxed) >= total_chunks {
                                     cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -873,11 +1068,15 @@ pub async fn send_file_session_multipath(
                             Ok(None) | Err(_) => {
                                 // Transport disconnected
                                 for cid in worker_in_flight.drain() {
+                                    worker_in_flight_times.remove(&cid);
                                     if let Some(e) = plan_map.get(&cid) {
                                         let _ = retry_tx.send(e.clone());
                                     }
                                 }
-                                log::warn!("Multipath transport #{} disconnected -> requeued in-flight chunks", idx);
+                                if let Some(ref tel) = telemetry_worker {
+                                    tel.record_channel_disconnect(&channel_name, "Transport disconnected / EOF");
+                                }
+                                log::warn!("Multipath transport #{} ({}) disconnected -> requeued in-flight chunks", idx, channel_name);
                                 return Ok((idx, transport, false));
                             }
                         }
@@ -896,16 +1095,26 @@ pub async fn send_file_session_multipath(
                                     payload: prepared.payload,
                                 });
 
+                                let t_s0 = std::time::Instant::now();
                                 if let Err(e) = transport.send_frame(&chunk_msg).await {
                                     let _ = retry_tx.send(prepared.entry);
                                     for cid in worker_in_flight.drain() {
+                                        worker_in_flight_times.remove(&cid);
                                         if let Some(e) = plan_map.get(&cid) {
                                             let _ = retry_tx.send(e.clone());
                                         }
                                     }
+                                    if let Some(ref tel) = telemetry_worker {
+                                        tel.record_channel_disconnect(&channel_name, &format!("Send error: {}", e));
+                                    }
                                     log::warn!("Multipath transport #{} send failed: {} -> requeued chunks", idx, e);
                                     return Ok((idx, transport, false));
                                 }
+                                let send_us = t_s0.elapsed().as_micros() as u64;
+                                if let Some(ref tel) = telemetry_worker {
+                                    tel.record_chunk_sent(&channel_name, chunk_id, prepared.entry.payload_length as u64, send_us);
+                                }
+                                worker_in_flight_times.insert(chunk_id, std::time::Instant::now());
 
                                 if let Message::ChunkData(d) = chunk_msg {
                                     let _ = recycle_tx.send(d.payload);
@@ -951,12 +1160,16 @@ pub async fn send_file_session_multipath(
     };
 
     if final_done < plan.len() {
+        telemetry.mark_failed("All multipath transports disconnected before completing transfer");
+        let data_dir = default_data_dir();
+        export_and_clean_telemetry(transfer_id, &data_dir);
         return Err(TransferSessionError::Transport(TransportError::Disconnected(
             "All multipath transports disconnected before completing transfer".into(),
         )));
     }
 
     // 3. Complete transfer on the first surviving transport
+    let t_fin0 = std::time::Instant::now();
     if let Some(mut primary_transport) = returned_transports.into_iter().next() {
         let file_checksum = match running_crc_rx.await {
             Ok(c) => c,
@@ -984,6 +1197,12 @@ pub async fn send_file_session_multipath(
             }
         }
     }
+
+    let fin_ms = t_fin0.elapsed().as_millis() as u64;
+    telemetry.record_finalize(fin_ms, true);
+    telemetry.mark_completed();
+    let data_dir = default_data_dir();
+    export_and_clean_telemetry(transfer_id, &data_dir);
 
     Ok(())
 }

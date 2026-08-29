@@ -69,6 +69,23 @@ enum Commands {
     /// List active, resumable, and completed transfers
     Transfers,
 
+    /// Show detailed logs and bottleneck diagnostics for a transfer
+    Log {
+        /// Transfer UUID to inspect
+        transfer_id: Uuid,
+
+        /// Output raw JSON telemetry report
+        #[arg(long)]
+        json: bool,
+
+        /// Print individual event timeline
+        #[arg(long)]
+        events: bool,
+    },
+
+    /// List all archived transfer diagnostic log files
+    Logs,
+
     /// Cancel an active transfer
     Cancel {
         /// Transfer UUID to cancel
@@ -253,6 +270,143 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     break;
                 }
+            }
+        }
+        Commands::Log {
+            transfer_id,
+            json,
+            events,
+        } => {
+            let data_dir = turbotransfer_core::transfer::default_data_dir();
+            let json_path = data_dir.join("logs").join(format!("{}.json", transfer_id));
+            let log_path = data_dir.join("logs").join(format!("{}.log", transfer_id));
+
+            if !json_path.exists() && !log_path.exists() {
+                if let Some(telemetry) = turbotransfer_core::util::telemetry::get_telemetry(transfer_id) {
+                    let report = telemetry.generate_report();
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&report)?);
+                    } else {
+                        println!("============================================================");
+                        println!("⚡ TURBOTRANSFER LIVE TELEMETRY & BOTTLENECK REPORT");
+                        println!("============================================================");
+                        println!("Transfer ID:      {}", report.transfer_id);
+                        println!("File:             {} ({} bytes)", report.file_name, report.file_size);
+                        println!("Role:             {:?}", report.role);
+                        println!("Duration:         {} ms", report.total_duration_ms);
+                        println!("Avg Throughput:   {:.2} MB/s ({:.2} Mbps)", report.avg_throughput_mbps, report.avg_throughput_mbps * 8.0);
+                        println!("Peak Throughput:  {:.2} MB/s", report.peak_throughput_mbps);
+                        println!("Primary Verdict:  🎯 {}", report.primary_bottleneck);
+                        println!("------------------------------------------------------------");
+                        println!("📊 Subsystem Latency & Speeds:");
+                        println!("  Sender Disk Read:     {:.2} MB/s (avg: {:.0} µs, p95: {:.0} µs)", report.sender_disk_read_mbps, report.sender_disk_read_avg_us, report.sender_disk_read_p95_us);
+                        println!("  Sender Checksum:      {:.2} MB/s (avg: {:.0} µs)", report.sender_checksum_mbps, report.sender_checksum_avg_us);
+                        println!("  Receiver Disk Write:  {:.2} MB/s (avg: {:.0} µs, p95: {:.0} µs, max queue: {})", report.receiver_disk_write_mbps, report.receiver_disk_write_avg_us, report.receiver_disk_write_p95_us, report.receiver_max_queue_depth);
+                        println!("  Receiver Finalize:    {} ms", report.receiver_finalize_ms);
+                        println!("------------------------------------------------------------");
+                        println!("🌐 Channel Metrics:");
+                        for ch in &report.channels {
+                            println!("  * [{}] {} bytes, {} chunks | write: {:.0} µs | RTT avg: {:.2} ms (p95: {:.2} ms) | NACKs: {}, drops: {}",
+                                ch.channel_name, ch.bytes_transferred, ch.chunks_transferred, ch.avg_socket_write_us, ch.avg_rtt_ms, ch.p95_rtt_ms, ch.nack_count, ch.disconnect_count
+                            );
+                        }
+                        if !report.recommendations.is_empty() {
+                            println!("------------------------------------------------------------");
+                            println!("💡 Diagnostic Recommendations:");
+                            for rec in &report.recommendations {
+                                println!("  - {}", rec);
+                            }
+                        }
+                        println!("============================================================");
+                    }
+                    if events {
+                        println!("\n📜 Event Timeline:");
+                        let evs = telemetry.events.lock();
+                        for ev in evs.iter() {
+                            println!("  +{:>6}ms [{:?}] [{}] {}", ev.relative_ms, ev.stage, ev.channel, ev.message);
+                        }
+                    }
+                    return Ok(());
+                }
+
+                eprintln!("No log files found for transfer {} in {}", transfer_id, data_dir.display());
+                return Ok(());
+            }
+
+            if json && json_path.exists() {
+                let content = std::fs::read_to_string(&json_path)?;
+                println!("{}", content);
+            } else if events && log_path.exists() {
+                let content = std::fs::read_to_string(&log_path)?;
+                println!("{}", content);
+            } else if json_path.exists() {
+                let content = std::fs::read_to_string(&json_path)?;
+                if let Ok(report) = serde_json::from_str::<turbotransfer_core::util::telemetry::BottleneckReport>(&content) {
+                    println!("============================================================");
+                    println!("⚡ TURBOTRANSFER HISTORICAL BOTTLENECK REPORT");
+                    println!("============================================================");
+                    println!("Transfer ID:      {}", report.transfer_id);
+                    println!("File:             {} ({} bytes)", report.file_name, report.file_size);
+                    println!("Role:             {:?}", report.role);
+                    println!("Duration:         {} ms", report.total_duration_ms);
+                    println!("Avg Throughput:   {:.2} MB/s ({:.2} Mbps)", report.avg_throughput_mbps, report.avg_throughput_mbps * 8.0);
+                    println!("Peak Throughput:  {:.2} MB/s", report.peak_throughput_mbps);
+                    println!("Primary Verdict:  🎯 {}", report.primary_bottleneck);
+                    println!("------------------------------------------------------------");
+                    println!("📊 Subsystem Latency & Speeds:");
+                    println!("  Sender Disk Read:     {:.2} MB/s (avg: {:.0} µs, p95: {:.0} µs)", report.sender_disk_read_mbps, report.sender_disk_read_avg_us, report.sender_disk_read_p95_us);
+                    println!("  Sender Checksum:      {:.2} MB/s (avg: {:.0} µs)", report.sender_checksum_mbps, report.sender_checksum_avg_us);
+                    println!("  Receiver Disk Write:  {:.2} MB/s (avg: {:.0} µs, p95: {:.0} µs, max queue: {})", report.receiver_disk_write_mbps, report.receiver_disk_write_avg_us, report.receiver_disk_write_p95_us, report.receiver_max_queue_depth);
+                    println!("  Receiver Finalize:    {} ms", report.receiver_finalize_ms);
+                    println!("------------------------------------------------------------");
+                    println!("🌐 Channel Metrics:");
+                    for ch in &report.channels {
+                        println!("  * [{}] {} bytes, {} chunks | write: {:.0} µs | RTT avg: {:.2} ms (p95: {:.2} ms) | NACKs: {}, drops: {}",
+                            ch.channel_name, ch.bytes_transferred, ch.chunks_transferred, ch.avg_socket_write_us, ch.avg_rtt_ms, ch.p95_rtt_ms, ch.nack_count, ch.disconnect_count
+                        );
+                    }
+                    if !report.recommendations.is_empty() {
+                        println!("------------------------------------------------------------");
+                        println!("💡 Diagnostic Recommendations:");
+                        for rec in &report.recommendations {
+                            println!("  - {}", rec);
+                        }
+                    }
+                    println!("============================================================");
+                    println!("Log files: {} | {}", json_path.display(), log_path.display());
+                } else if log_path.exists() {
+                    let content = std::fs::read_to_string(&log_path)?;
+                    println!("{}", content);
+                }
+            } else if log_path.exists() {
+                let content = std::fs::read_to_string(&log_path)?;
+                println!("{}", content);
+            }
+        }
+        Commands::Logs => {
+            let data_dir = turbotransfer_core::transfer::default_data_dir();
+            let logs_dir = data_dir.join("logs");
+            println!("Transfer Diagnostic Log Directory: {}", logs_dir.display());
+            println!("------------------------------------------------------------");
+            if let Ok(entries) = std::fs::read_dir(&logs_dir) {
+                let mut found = 0;
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                        if let Ok(content) = std::fs::read_to_string(&path) {
+                            if let Ok(report) = serde_json::from_str::<turbotransfer_core::util::telemetry::BottleneckReport>(&content) {
+                                found += 1;
+                                println!("{}. [{:?}] {} ({} bytes, ID: {})", found, report.role, report.file_name, report.file_size, report.transfer_id);
+                                println!("   Throughput: {:.2} MB/s | Duration: {} ms | Verdict: {}", report.avg_throughput_mbps, report.total_duration_ms, report.primary_bottleneck);
+                            }
+                        }
+                    }
+                }
+                if found == 0 {
+                    println!("No transfer logs found yet. Logs are automatically written when transfers complete or fail.");
+                }
+            } else {
+                println!("No logs directory found at {}.", logs_dir.display());
             }
         }
         Commands::Cancel { transfer_id } => {

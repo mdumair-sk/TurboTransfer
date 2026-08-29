@@ -27,6 +27,8 @@ fn perform_cleanup() {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    turbotransfer_core::util::init_telemetry_logger();
+
     // Set panic hook to ensure terminal restoration and clean exit
     let default_panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {

@@ -18,6 +18,10 @@ use crate::transport::{
     TcpListenerTransport, TcpTransport, Transport, UsbTransport, UsbTransportConfig,
     WifiDirectTransport,
 };
+use crate::util::telemetry::{
+    export_and_clean_telemetry, get_or_create_telemetry, EventLevel, TransferStage,
+    TransferTelemetry,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TransportPreference {
@@ -545,6 +549,11 @@ pub async fn start_transfer(
     }.await;
 
     if let Err(e) = connect_res {
+        if let Some(telemetry) = crate::util::telemetry::get_telemetry(transfer_id) {
+            telemetry.mark_failed(&e.to_string());
+            let data_dir = default_data_dir();
+            export_and_clean_telemetry(transfer_id, &data_dir);
+        }
         set_transfer_status(transfer_id, TransferStatus::Failed, Some(e.to_string()));
         return Err(e);
     }
@@ -675,7 +684,12 @@ pub async fn enter_receive_mode(
 
 #[allow(dead_code)]
 enum DiskWriteCmd {
-    Write { file_offset: u64, payload: Vec<u8> },
+    Write {
+        chunk_id: u32,
+        file_offset: u64,
+        payload: Vec<u8>,
+        queue_depth: u32,
+    },
     Flush(tokio::sync::oneshot::Sender<std::io::Result<()>>),
     Close(tokio::sync::oneshot::Sender<std::io::Result<()>>),
 }
@@ -691,6 +705,7 @@ struct ActiveReceiveSession {
     pub completed_chunks_count: Arc<AtomicU32>,
     pub is_completed: Arc<std::sync::atomic::AtomicBool>,
     pub is_sender_in_same_process: bool,
+    pub telemetry: Arc<TransferTelemetry>,
 }
 
 static ACTIVE_RECEIVE_SESSIONS: std::sync::OnceLock<Mutex<HashMap<Uuid, Arc<ActiveReceiveSession>>>> =
@@ -738,6 +753,24 @@ async fn handle_incoming_receive_transport(
         None => return Ok(()),
     };
 
+    let telemetry = get_or_create_telemetry(
+        offer.transfer_id,
+        &offer.file_name,
+        offer.file_size,
+        TransferRole::Receiver,
+    );
+
+    telemetry.record_event(
+        TransferStage::Handshake,
+        EventLevel::Info,
+        "Receiver",
+        None,
+        None,
+        Some(offer.file_size),
+        format!("Received and accepted TransferOffer for '{}' ({} bytes, {} chunks)", offer.file_name, offer.file_size, offer.total_chunks),
+        None,
+    );
+
     // 3. Get or create ActiveReceiveSession
     let session = {
         let mut map = get_active_receive_sessions().lock().unwrap();
@@ -752,7 +785,21 @@ async fn handle_incoming_receive_transport(
                 .write(true)
                 .create(true)
                 .open(&part_path)?;
+
+            let t_pre = std::time::Instant::now();
             crate::util::storage::preallocate_file(&file, offer.file_size)?;
+            let pre_us = t_pre.elapsed().as_micros() as u64;
+
+            telemetry.record_event(
+                TransferStage::DiskWrite,
+                EventLevel::Debug,
+                "ReceiverDisk",
+                None,
+                Some(pre_us),
+                Some(offer.file_size),
+                format!("Preallocated {} bytes in {} us", offer.file_size, pre_us),
+                None,
+            );
 
             register_active_transfer(
                 offer.transfer_id,
@@ -771,14 +818,20 @@ async fn handle_incoming_receive_transport(
 
             let (disk_tx, mut disk_rx) = tokio::sync::mpsc::channel::<DiskWriteCmd>(128);
             let mut writer_file = file;
+            let tel_for_disk = telemetry.clone();
+
             tokio::task::spawn_blocking(move || {
                 use std::io::{Seek, SeekFrom, Write};
                 while let Some(cmd) = disk_rx.blocking_recv() {
                     match cmd {
-                        DiskWriteCmd::Write { file_offset, payload } => {
+                        DiskWriteCmd::Write { chunk_id, file_offset, payload, queue_depth } => {
+                            let t_w0 = std::time::Instant::now();
+                            let len = payload.len() as u64;
                             if let Err(e) = writer_file.seek(SeekFrom::Start(file_offset)).and_then(|_| writer_file.write_all(&payload)) {
                                 log::error!("Background disk write error: {}", e);
                             }
+                            let write_us = t_w0.elapsed().as_micros() as u64;
+                            tel_for_disk.record_disk_write(chunk_id, len, write_us, queue_depth);
                         }
                         DiskWriteCmd::Flush(reply_tx) => {
                             let res = writer_file.flush();
@@ -805,6 +858,7 @@ async fn handle_incoming_receive_transport(
                 completed_chunks_count: Arc::new(AtomicU32::new(0)),
                 is_completed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 is_sender_in_same_process,
+                telemetry: telemetry.clone(),
             });
             map.insert(offer.transfer_id, new_session.clone());
             new_session
@@ -827,8 +881,22 @@ async fn handle_incoming_receive_transport(
 
         match frame {
             Message::ChunkData(chunk_data) => {
+                let ch_name = if is_usb { "USB" } else { "Wi-Fi" };
+                let t_v0 = std::time::Instant::now();
                 let computed_checksum = compute_xxhash64(&chunk_data.payload);
+                let verify_us = t_v0.elapsed().as_micros() as u64;
+
                 if computed_checksum != chunk_data.checksum {
+                    session.telemetry.record_event(
+                        TransferStage::Checksum,
+                        EventLevel::Warn,
+                        ch_name,
+                        Some(chunk_data.chunk_id),
+                        Some(verify_us),
+                        Some(chunk_data.payload.len() as u64),
+                        format!("Checksum mismatch on chunk #{}", chunk_data.chunk_id),
+                        None,
+                    );
                     let nack = Message::ChunkNack(ChunkNackData {
                         transfer_id: chunk_data.transfer_id,
                         chunk_id: chunk_data.chunk_id,
@@ -837,6 +905,14 @@ async fn handle_incoming_receive_transport(
                     transport.send_frame(&nack).await?;
                     continue;
                 }
+
+                session.telemetry.record_chunk_recv(
+                    ch_name,
+                    chunk_data.chunk_id,
+                    chunk_data.payload_length as u64,
+                    0,
+                    verify_us,
+                );
 
                 let is_duplicate = {
                     let tracker = session.tracker.lock();
@@ -849,6 +925,7 @@ async fn handle_incoming_receive_transport(
                 };
 
                 if is_duplicate {
+                    session.telemetry.record_duplicate_chunk(chunk_data.chunk_id);
                     // Fix B2: Ensure chunk_crcs is populated even on duplicates so total_chunks match at Complete
                     {
                         let mut crc_map = session.chunk_crcs.lock();
@@ -897,14 +974,18 @@ async fn handle_incoming_receive_transport(
                 transport.send_frame(&ack).await?;
 
                 // Queue disk write asynchronously
+                let q_depth = (128 - session.disk_tx.capacity()) as u32;
                 let _ = session.disk_tx.send(DiskWriteCmd::Write {
+                    chunk_id: chunk_data.chunk_id,
                     file_offset: chunk_data.file_offset,
                     payload: chunk_data.payload,
+                    queue_depth: q_depth,
                 }).await;
             }
             Message::Complete(complete_data) => {
                 let was_completed = session.is_completed.swap(true, Ordering::SeqCst);
                 if !was_completed {
+                    let t_fin0 = std::time::Instant::now();
                     // Close background disk writer and flush before checking file checksum
                     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
                     let _ = session.disk_tx.send(DiskWriteCmd::Close(reply_tx)).await;
@@ -930,6 +1011,12 @@ async fn handle_incoming_receive_transport(
                     };
 
                     if file_crc != complete_data.file_checksum {
+                        session.telemetry.mark_failed(&format!(
+                            "CRC32C mismatch: expected 0x{:08X}, got 0x{:08X}",
+                            complete_data.file_checksum, file_crc
+                        ));
+                        let data_dir = default_data_dir();
+                        export_and_clean_telemetry(complete_data.transfer_id, &data_dir);
                         set_transfer_status(
                             complete_data.transfer_id,
                             TransferStatus::Failed,
@@ -943,6 +1030,12 @@ async fn handle_incoming_receive_transport(
 
                     std::fs::rename(&session.part_path, &session.file_path)?;
                     set_transfer_status(complete_data.transfer_id, TransferStatus::Completed, None);
+
+                    let fin_ms = t_fin0.elapsed().as_millis() as u64;
+                    session.telemetry.record_finalize(fin_ms, true);
+                    session.telemetry.mark_completed();
+                    let data_dir = default_data_dir();
+                    export_and_clean_telemetry(complete_data.transfer_id, &data_dir);
 
                     let _ = completion_tx.send(session.file_path.clone());
                     get_active_receive_sessions()
@@ -960,6 +1053,7 @@ async fn handle_incoming_receive_transport(
                 break;
             }
             Message::Pause(pause_data) => {
+                session.telemetry.record_event(TransferStage::Control, EventLevel::Info, "Receiver", None, None, None, "Receiver received Pause", None);
                 set_transfer_status(pause_data.transfer_id, TransferStatus::Paused, None);
                 let ack = Message::ChunkAck(ChunkAckData {
                     transfer_id: pause_data.transfer_id,
@@ -968,6 +1062,7 @@ async fn handle_incoming_receive_transport(
                 transport.send_frame(&ack).await?;
             }
             Message::Resume(resume_data) => {
+                session.telemetry.record_event(TransferStage::Control, EventLevel::Info, "Receiver", None, None, None, "Receiver received Resume", None);
                 set_transfer_status(resume_data.transfer_id, TransferStatus::InProgress, None);
                 let ack = Message::ChunkAck(ChunkAckData {
                     transfer_id: resume_data.transfer_id,
@@ -976,6 +1071,10 @@ async fn handle_incoming_receive_transport(
                 transport.send_frame(&ack).await?;
             }
             Message::Cancel(cancel_data) => {
+                session.telemetry.record_event(TransferStage::Control, EventLevel::Info, "Receiver", None, None, None, "Receiver received Cancel", None);
+                session.telemetry.mark_failed("Transfer cancelled by peer");
+                let data_dir = default_data_dir();
+                export_and_clean_telemetry(cancel_data.transfer_id, &data_dir);
                 set_transfer_status(cancel_data.transfer_id, TransferStatus::Cancelled, None);
                 let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
                 let _ = session.disk_tx.send(DiskWriteCmd::Close(reply_tx)).await;
@@ -1047,13 +1146,43 @@ pub fn pause_transfer(transfer_id: Uuid) {
     }
 }
 
+static CUSTOM_DATA_DIR: parking_lot::RwLock<Option<PathBuf>> = parking_lot::RwLock::new(None);
+
+pub fn set_custom_data_dir(path: PathBuf) {
+    let _ = std::fs::create_dir_all(&path);
+    *CUSTOM_DATA_DIR.write() = Some(path);
+}
+
 /// Returns the default metadata storage directory (§12).
 pub fn default_data_dir() -> PathBuf {
+    if let Some(ref custom) = *CUSTOM_DATA_DIR.read() {
+        let _ = std::fs::create_dir_all(custom);
+        return custom.clone();
+    }
+    if let Ok(dir) = std::env::var("TURBOTRANSFER_DATA_DIR") {
+        let p = PathBuf::from(dir);
+        let _ = std::fs::create_dir_all(&p);
+        return p;
+    }
     if let Ok(appdata) = std::env::var("APPDATA") {
         let p = PathBuf::from(appdata).join("turbotransfer");
         let _ = std::fs::create_dir_all(&p);
         p
     } else {
+        #[cfg(target_os = "android")]
+        {
+            let candidates = [
+                PathBuf::from("/storage/emulated/0/Download/TurboTransfer"),
+                PathBuf::from("/sdcard/Download/TurboTransfer"),
+                PathBuf::from("/data/data/com.turbotransfer/files"),
+                PathBuf::from("/data/user/0/com.turbotransfer/files"),
+            ];
+            for c in &candidates {
+                if std::fs::create_dir_all(c).is_ok() {
+                    return c.clone();
+                }
+            }
+        }
         let p = std::env::temp_dir().join("turbotransfer");
         let _ = std::fs::create_dir_all(&p);
         p

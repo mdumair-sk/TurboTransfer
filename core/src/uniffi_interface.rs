@@ -108,6 +108,67 @@ pub struct FfiTransferSummary {
 }
 
 #[derive(uniffi::Record, Debug, Clone)]
+pub struct FfiTransferEvent {
+    pub timestamp_us: u64,
+    pub relative_ms: u64,
+    pub stage: String,
+    pub level: String,
+    pub channel: String,
+    pub chunk_id: Option<u32>,
+    pub duration_us: Option<u64>,
+    pub bytes: Option<u64>,
+    pub message: String,
+}
+
+#[derive(uniffi::Record, Debug, Clone)]
+pub struct FfiChannelMetric {
+    pub channel_name: String,
+    pub bytes_transferred: u64,
+    pub chunks_transferred: u32,
+    pub avg_socket_write_us: f64,
+    pub avg_rtt_ms: f64,
+    pub p95_rtt_ms: f64,
+    pub nack_count: u64,
+    pub disconnect_count: u64,
+}
+
+#[derive(uniffi::Record, Debug, Clone)]
+pub struct FfiBottleneckReport {
+    pub transfer_id: String,
+    pub file_name: String,
+    pub file_size: u64,
+    pub role: String,
+    pub total_duration_ms: u64,
+    pub avg_throughput_mbps: f64,
+    pub peak_throughput_mbps: f64,
+    pub sender_disk_read_mbps: f64,
+    pub sender_disk_read_avg_us: f64,
+    pub sender_disk_read_p95_us: f64,
+    pub sender_checksum_mbps: f64,
+    pub sender_checksum_avg_us: f64,
+    pub receiver_disk_write_mbps: f64,
+    pub receiver_disk_write_avg_us: f64,
+    pub receiver_disk_write_p95_us: f64,
+    pub receiver_max_queue_depth: u32,
+    pub receiver_finalize_ms: u64,
+    pub channels: Vec<FfiChannelMetric>,
+    pub primary_bottleneck: String,
+    pub recommendations: Vec<String>,
+}
+
+#[derive(uniffi::Record, Debug, Clone)]
+pub struct FfiTransferLogSummary {
+    pub transfer_id: String,
+    pub file_name: String,
+    pub file_size: u64,
+    pub role: String,
+    pub avg_throughput_mbps: f64,
+    pub primary_bottleneck: String,
+    pub log_file_path: String,
+    pub json_file_path: String,
+}
+
+#[derive(uniffi::Record, Debug, Clone)]
 pub struct FfiWifiHotspotInfo {
     pub ssid: String,
     pub passphrase: String,
@@ -131,6 +192,159 @@ fn get_runtime() -> &'static tokio::runtime::Runtime {
             .build()
             .expect("Failed to create Tokio runtime for UniFFI")
     })
+}
+
+#[uniffi::export]
+pub fn init_logger() {
+    crate::util::telemetry::init_telemetry_logger();
+}
+
+#[uniffi::export]
+pub fn get_transfer_logs(transfer_id: String, max_events: Option<u32>) -> Vec<FfiTransferEvent> {
+    let id = match Uuid::parse_str(&transfer_id) {
+        Ok(i) => i,
+        Err(_) => return Vec::new(),
+    };
+    let limit = max_events.unwrap_or(u32::MAX) as usize;
+    if let Some(telemetry) = crate::util::telemetry::get_telemetry(id) {
+        telemetry
+            .events
+            .lock()
+            .iter()
+            .take(limit)
+            .map(|e| FfiTransferEvent {
+                timestamp_us: e.timestamp_us,
+                relative_ms: e.relative_ms,
+                stage: format!("{:?}", e.stage),
+                level: format!("{:?}", e.level),
+                channel: e.channel.clone(),
+                chunk_id: e.chunk_id,
+                duration_us: e.duration_us,
+                bytes: e.bytes,
+                message: e.message.clone(),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    }
+}
+
+#[uniffi::export]
+pub fn set_data_directory(path: String) {
+    crate::transfer::api::set_custom_data_dir(std::path::PathBuf::from(path));
+}
+
+#[uniffi::export]
+pub fn get_transfer_log_json(transfer_id: String) -> String {
+    let id = match Uuid::parse_str(&transfer_id) {
+        Ok(i) => i,
+        Err(_) => return "{}".to_string(),
+    };
+    if let Some(telemetry) = crate::util::telemetry::get_telemetry(id) {
+        let report = telemetry.generate_report();
+        serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string())
+    } else {
+        let log_path = crate::transfer::api::default_data_dir().join("logs").join(format!("{}.json", transfer_id));
+        std::fs::read_to_string(&log_path).unwrap_or_else(|_| "{}".to_string())
+    }
+}
+
+#[uniffi::export]
+pub fn get_transfer_bottleneck_report(transfer_id: String) -> Option<FfiBottleneckReport> {
+    let id = Uuid::parse_str(&transfer_id).ok()?;
+    let report = if let Some(telemetry) = crate::util::telemetry::get_telemetry(id) {
+        telemetry.generate_report()
+    } else {
+        let log_path = crate::transfer::api::default_data_dir().join("logs").join(format!("{}.json", transfer_id));
+        let content = std::fs::read_to_string(&log_path).ok()?;
+        serde_json::from_str::<crate::util::telemetry::BottleneckReport>(&content).ok()?
+    };
+
+    Some(FfiBottleneckReport {
+        transfer_id: report.transfer_id.to_string(),
+        file_name: report.file_name,
+        file_size: report.file_size,
+        role: format!("{:?}", report.role),
+        total_duration_ms: report.total_duration_ms,
+        avg_throughput_mbps: report.avg_throughput_mbps,
+        peak_throughput_mbps: report.peak_throughput_mbps,
+        sender_disk_read_mbps: report.sender_disk_read_mbps,
+        sender_disk_read_avg_us: report.sender_disk_read_avg_us,
+        sender_disk_read_p95_us: report.sender_disk_read_p95_us,
+        sender_checksum_mbps: report.sender_checksum_mbps,
+        sender_checksum_avg_us: report.sender_checksum_avg_us,
+        receiver_disk_write_mbps: report.receiver_disk_write_mbps,
+        receiver_disk_write_avg_us: report.receiver_disk_write_avg_us,
+        receiver_disk_write_p95_us: report.receiver_disk_write_p95_us,
+        receiver_max_queue_depth: report.receiver_max_queue_depth,
+        receiver_finalize_ms: report.receiver_finalize_ms,
+        channels: report
+            .channels
+            .into_iter()
+            .map(|c| FfiChannelMetric {
+                channel_name: c.channel_name,
+                bytes_transferred: c.bytes_transferred,
+                chunks_transferred: c.chunks_transferred,
+                avg_socket_write_us: c.avg_socket_write_us,
+                avg_rtt_ms: c.avg_rtt_ms,
+                p95_rtt_ms: c.p95_rtt_ms,
+                nack_count: c.nack_count,
+                disconnect_count: c.disconnect_count,
+            })
+            .collect(),
+        primary_bottleneck: report.primary_bottleneck,
+        recommendations: report.recommendations,
+    })
+}
+
+#[uniffi::export]
+pub fn export_transfer_logs(transfer_id: String, output_dir: Option<String>) -> Result<String, FfiTransferError> {
+    let id = Uuid::parse_str(&transfer_id).map_err(|e| FfiTransferError::Generic { msg: e.to_string() })?;
+    let out_dir = output_dir.map(PathBuf::from).unwrap_or_else(crate::transfer::api::default_data_dir);
+    if let Some(telemetry) = crate::util::telemetry::get_telemetry(id) {
+        telemetry
+            .export_log_files(&out_dir)
+            .map(|(j, _l)| j.to_string_lossy().to_string())
+            .map_err(|e| FfiTransferError::Generic { msg: e.to_string() })
+    } else {
+        let json_path = out_dir.join("logs").join(format!("{}.json", transfer_id));
+        if json_path.exists() {
+            Ok(json_path.to_string_lossy().to_string())
+        } else {
+            Err(FfiTransferError::Generic {
+                msg: format!("No logs found for transfer {}", transfer_id),
+            })
+        }
+    }
+}
+
+#[uniffi::export]
+pub fn list_transfer_logs() -> Vec<FfiTransferLogSummary> {
+    let logs_dir = crate::transfer::api::default_data_dir().join("logs");
+    let mut summaries = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&logs_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if let Ok(report) = serde_json::from_str::<crate::util::telemetry::BottleneckReport>(&content) {
+                        let log_path = path.with_extension("log");
+                        summaries.push(FfiTransferLogSummary {
+                            transfer_id: report.transfer_id.to_string(),
+                            file_name: report.file_name,
+                            file_size: report.file_size,
+                            role: format!("{:?}", report.role),
+                            avg_throughput_mbps: report.avg_throughput_mbps,
+                            primary_bottleneck: report.primary_bottleneck,
+                            log_file_path: log_path.to_string_lossy().to_string(),
+                            json_file_path: path.to_string_lossy().to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    summaries
 }
 
 #[uniffi::export]

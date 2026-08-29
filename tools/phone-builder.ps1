@@ -110,7 +110,7 @@ elseif ($Command -eq "build-core") {
     Write-Host "`nBuilding 'turbotransfer-core' natively on 8 Snapdragon Oryon Cores..." -ForegroundColor Yellow
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
-    Invoke-PhoneSSH -RemoteCommand "cd ~/turbotransfer; cargo build --release -p turbotransfer-core"
+    Invoke-PhoneSSH -RemoteCommand "cd ~/turbotransfer; cargo build --release -p turbotransfer-core; cargo run --release --bin uniffi-bindgen"
 
     $sw.Stop()
     $elapsedSec = [math]::Round($sw.Elapsed.TotalSeconds, 2)
@@ -124,13 +124,24 @@ elseif ($Command -eq "build-core") {
     Write-Host "Pulling compiled shared library into jniLibs/arm64-v8a..." -ForegroundColor Cyan
     $scpArgs = @("-P", "$Port", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR")
     if (Test-Path $KeyPath) { $scpArgs += @("-i", $KeyPath) }
-    $scpArgs += @("localhost:turbotransfer/target/release/libturbotransfer_core.so", $destFile)
+    $scpArgsLib = $scpArgs + @("localhost:turbotransfer/target/release/libturbotransfer_core.so", $destFile)
 
-    & scp @scpArgs
+    & scp @scpArgsLib
     if (Test-Path $destFile) {
         $fileSizeMB = (Get-Item $destFile).Length / 1MB
         $rounded = [math]::Round($fileSizeMB, 2)
         Write-Host "Successfully updated libturbotransfer_core.so ($rounded MB)" -ForegroundColor Green
+    }
+
+    # Pull generated turbotransfer_core.kt back into android app java sources
+    $ktDestDir = Join-Path $ProjectRoot "android\app\src\main\java\uniffi\turbotransfer_core"
+    if (-not (Test-Path $ktDestDir)) { New-Item -ItemType Directory -Path $ktDestDir -Force | Out-Null }
+    $ktDestFile = Join-Path $ktDestDir "turbotransfer_core.kt"
+    Write-Host "Pulling generated turbotransfer_core.kt..." -ForegroundColor Cyan
+    $scpArgsKt = $scpArgs + @("localhost:turbotransfer_uniffi_out/uniffi/turbotransfer_core/turbotransfer_core.kt", $ktDestFile)
+    & scp @scpArgsKt
+    if (Test-Path $ktDestFile) {
+        Write-Host "Successfully updated turbotransfer_core.kt" -ForegroundColor Green
     }
 }
 elseif ($Command -eq "build") {

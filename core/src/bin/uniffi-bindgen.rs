@@ -2,15 +2,18 @@ use camino::Utf8Path;
 
 fn main() {
     let udl_path = Utf8Path::new("core/src/turbotransfer_core.udl");
-    let cdylib_path = if cfg!(target_os = "windows") {
-        Utf8Path::new("target/debug/turbotransfer_core.dll")
-    } else if cfg!(target_os = "macos") {
-        Utf8Path::new("target/debug/libturbotransfer_core.dylib")
-    } else {
+    let cdylib_path = if Utf8Path::new("target/release/libturbotransfer_core.so").exists() {
+        Utf8Path::new("target/release/libturbotransfer_core.so")
+    } else if Utf8Path::new("target/release/turbotransfer_core.dll").exists() {
+        Utf8Path::new("target/release/turbotransfer_core.dll")
+    } else if Utf8Path::new("target/debug/libturbotransfer_core.so").exists() {
         Utf8Path::new("target/debug/libturbotransfer_core.so")
+    } else {
+        Utf8Path::new("target/debug/turbotransfer_core.dll")
     };
 
-    let out_dir = Utf8Path::new("android/app/src/main/java");
+    let out_dir = Utf8Path::new("/data/data/com.termux/files/home/turbotransfer_uniffi_out");
+    let _ = std::fs::create_dir_all(out_dir);
 
     println!("Generating Kotlin bindings using {:?} and {:?}", udl_path, cdylib_path);
 

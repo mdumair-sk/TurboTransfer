@@ -729,6 +729,20 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -748,16 +762,30 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_turbotransfer_core_fn_func_enter_receive_mode(`address`: RustBuffer.ByValue,`destDir`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_turbotransfer_core_fn_func_export_transfer_logs(`transferId`: RustBuffer.ByValue,`outputDir`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_turbotransfer_core_fn_func_get_devices(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_turbotransfer_core_fn_func_get_progress(`transferId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_turbotransfer_core_fn_func_get_transfer_bottleneck_report(`transferId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_turbotransfer_core_fn_func_get_transfer_log_json(`transferId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_turbotransfer_core_fn_func_get_transfer_logs(`transferId`: RustBuffer.ByValue,`maxEvents`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_turbotransfer_core_fn_func_get_transfers(uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_turbotransfer_core_fn_func_init_logger(uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_turbotransfer_core_fn_func_list_transfer_logs(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_turbotransfer_core_fn_func_pause_transfer(`transferId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_turbotransfer_core_fn_func_resume_transfer(`transferId`: RustBuffer.ByValue,`transportPref`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_turbotransfer_core_fn_func_set_data_directory(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_turbotransfer_core_fn_func_start_transfer(`filePath`: RustBuffer.ByValue,`fileName`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`transportPref`: RustBuffer.ByValue,`address`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_turbotransfer_core_fn_func_stop_receive_mode(uniffi_out_err: UniffiRustCallStatus, 
@@ -878,15 +906,29 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_turbotransfer_core_checksum_func_enter_receive_mode(
     ): Short
+    fun uniffi_turbotransfer_core_checksum_func_export_transfer_logs(
+    ): Short
     fun uniffi_turbotransfer_core_checksum_func_get_devices(
     ): Short
     fun uniffi_turbotransfer_core_checksum_func_get_progress(
     ): Short
+    fun uniffi_turbotransfer_core_checksum_func_get_transfer_bottleneck_report(
+    ): Short
+    fun uniffi_turbotransfer_core_checksum_func_get_transfer_log_json(
+    ): Short
+    fun uniffi_turbotransfer_core_checksum_func_get_transfer_logs(
+    ): Short
     fun uniffi_turbotransfer_core_checksum_func_get_transfers(
+    ): Short
+    fun uniffi_turbotransfer_core_checksum_func_init_logger(
+    ): Short
+    fun uniffi_turbotransfer_core_checksum_func_list_transfer_logs(
     ): Short
     fun uniffi_turbotransfer_core_checksum_func_pause_transfer(
     ): Short
     fun uniffi_turbotransfer_core_checksum_func_resume_transfer(
+    ): Short
+    fun uniffi_turbotransfer_core_checksum_func_set_data_directory(
     ): Short
     fun uniffi_turbotransfer_core_checksum_func_start_transfer(
     ): Short
@@ -915,19 +957,40 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_turbotransfer_core_checksum_func_enter_receive_mode() != 40189.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_turbotransfer_core_checksum_func_export_transfer_logs() != 40795.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_turbotransfer_core_checksum_func_get_devices() != 21628.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_turbotransfer_core_checksum_func_get_progress() != 59093.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_turbotransfer_core_checksum_func_get_transfer_bottleneck_report() != 7569.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_turbotransfer_core_checksum_func_get_transfer_log_json() != 14680.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_turbotransfer_core_checksum_func_get_transfer_logs() != 37922.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_turbotransfer_core_checksum_func_get_transfers() != 32457.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_turbotransfer_core_checksum_func_init_logger() != 46680.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_turbotransfer_core_checksum_func_list_transfer_logs() != 33245.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_turbotransfer_core_checksum_func_pause_transfer() != 57812.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_turbotransfer_core_checksum_func_resume_transfer() != 47857.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_turbotransfer_core_checksum_func_set_data_directory() != 5757.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_turbotransfer_core_checksum_func_start_transfer() != 54351.toShort()) {
@@ -1157,6 +1220,166 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
 
 
 
+data class FfiBottleneckReport (
+    var `transferId`: kotlin.String, 
+    var `fileName`: kotlin.String, 
+    var `fileSize`: kotlin.ULong, 
+    var `role`: kotlin.String, 
+    var `totalDurationMs`: kotlin.ULong, 
+    var `avgThroughputMbps`: kotlin.Double, 
+    var `peakThroughputMbps`: kotlin.Double, 
+    var `senderDiskReadMbps`: kotlin.Double, 
+    var `senderDiskReadAvgUs`: kotlin.Double, 
+    var `senderDiskReadP95Us`: kotlin.Double, 
+    var `senderChecksumMbps`: kotlin.Double, 
+    var `senderChecksumAvgUs`: kotlin.Double, 
+    var `receiverDiskWriteMbps`: kotlin.Double, 
+    var `receiverDiskWriteAvgUs`: kotlin.Double, 
+    var `receiverDiskWriteP95Us`: kotlin.Double, 
+    var `receiverMaxQueueDepth`: kotlin.UInt, 
+    var `receiverFinalizeMs`: kotlin.ULong, 
+    var `channels`: List<FfiChannelMetric>, 
+    var `primaryBottleneck`: kotlin.String, 
+    var `recommendations`: List<kotlin.String>
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiBottleneckReport: FfiConverterRustBuffer<FfiBottleneckReport> {
+    override fun read(buf: ByteBuffer): FfiBottleneckReport {
+        return FfiBottleneckReport(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterSequenceTypeFfiChannelMetric.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiBottleneckReport) = (
+            FfiConverterString.allocationSize(value.`transferId`) +
+            FfiConverterString.allocationSize(value.`fileName`) +
+            FfiConverterULong.allocationSize(value.`fileSize`) +
+            FfiConverterString.allocationSize(value.`role`) +
+            FfiConverterULong.allocationSize(value.`totalDurationMs`) +
+            FfiConverterDouble.allocationSize(value.`avgThroughputMbps`) +
+            FfiConverterDouble.allocationSize(value.`peakThroughputMbps`) +
+            FfiConverterDouble.allocationSize(value.`senderDiskReadMbps`) +
+            FfiConverterDouble.allocationSize(value.`senderDiskReadAvgUs`) +
+            FfiConverterDouble.allocationSize(value.`senderDiskReadP95Us`) +
+            FfiConverterDouble.allocationSize(value.`senderChecksumMbps`) +
+            FfiConverterDouble.allocationSize(value.`senderChecksumAvgUs`) +
+            FfiConverterDouble.allocationSize(value.`receiverDiskWriteMbps`) +
+            FfiConverterDouble.allocationSize(value.`receiverDiskWriteAvgUs`) +
+            FfiConverterDouble.allocationSize(value.`receiverDiskWriteP95Us`) +
+            FfiConverterUInt.allocationSize(value.`receiverMaxQueueDepth`) +
+            FfiConverterULong.allocationSize(value.`receiverFinalizeMs`) +
+            FfiConverterSequenceTypeFfiChannelMetric.allocationSize(value.`channels`) +
+            FfiConverterString.allocationSize(value.`primaryBottleneck`) +
+            FfiConverterSequenceString.allocationSize(value.`recommendations`)
+    )
+
+    override fun write(value: FfiBottleneckReport, buf: ByteBuffer) {
+            FfiConverterString.write(value.`transferId`, buf)
+            FfiConverterString.write(value.`fileName`, buf)
+            FfiConverterULong.write(value.`fileSize`, buf)
+            FfiConverterString.write(value.`role`, buf)
+            FfiConverterULong.write(value.`totalDurationMs`, buf)
+            FfiConverterDouble.write(value.`avgThroughputMbps`, buf)
+            FfiConverterDouble.write(value.`peakThroughputMbps`, buf)
+            FfiConverterDouble.write(value.`senderDiskReadMbps`, buf)
+            FfiConverterDouble.write(value.`senderDiskReadAvgUs`, buf)
+            FfiConverterDouble.write(value.`senderDiskReadP95Us`, buf)
+            FfiConverterDouble.write(value.`senderChecksumMbps`, buf)
+            FfiConverterDouble.write(value.`senderChecksumAvgUs`, buf)
+            FfiConverterDouble.write(value.`receiverDiskWriteMbps`, buf)
+            FfiConverterDouble.write(value.`receiverDiskWriteAvgUs`, buf)
+            FfiConverterDouble.write(value.`receiverDiskWriteP95Us`, buf)
+            FfiConverterUInt.write(value.`receiverMaxQueueDepth`, buf)
+            FfiConverterULong.write(value.`receiverFinalizeMs`, buf)
+            FfiConverterSequenceTypeFfiChannelMetric.write(value.`channels`, buf)
+            FfiConverterString.write(value.`primaryBottleneck`, buf)
+            FfiConverterSequenceString.write(value.`recommendations`, buf)
+    }
+}
+
+
+
+data class FfiChannelMetric (
+    var `channelName`: kotlin.String, 
+    var `bytesTransferred`: kotlin.ULong, 
+    var `chunksTransferred`: kotlin.UInt, 
+    var `avgSocketWriteUs`: kotlin.Double, 
+    var `avgRttMs`: kotlin.Double, 
+    var `p95RttMs`: kotlin.Double, 
+    var `nackCount`: kotlin.ULong, 
+    var `disconnectCount`: kotlin.ULong
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiChannelMetric: FfiConverterRustBuffer<FfiChannelMetric> {
+    override fun read(buf: ByteBuffer): FfiChannelMetric {
+        return FfiChannelMetric(
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiChannelMetric) = (
+            FfiConverterString.allocationSize(value.`channelName`) +
+            FfiConverterULong.allocationSize(value.`bytesTransferred`) +
+            FfiConverterUInt.allocationSize(value.`chunksTransferred`) +
+            FfiConverterDouble.allocationSize(value.`avgSocketWriteUs`) +
+            FfiConverterDouble.allocationSize(value.`avgRttMs`) +
+            FfiConverterDouble.allocationSize(value.`p95RttMs`) +
+            FfiConverterULong.allocationSize(value.`nackCount`) +
+            FfiConverterULong.allocationSize(value.`disconnectCount`)
+    )
+
+    override fun write(value: FfiChannelMetric, buf: ByteBuffer) {
+            FfiConverterString.write(value.`channelName`, buf)
+            FfiConverterULong.write(value.`bytesTransferred`, buf)
+            FfiConverterUInt.write(value.`chunksTransferred`, buf)
+            FfiConverterDouble.write(value.`avgSocketWriteUs`, buf)
+            FfiConverterDouble.write(value.`avgRttMs`, buf)
+            FfiConverterDouble.write(value.`p95RttMs`, buf)
+            FfiConverterULong.write(value.`nackCount`, buf)
+            FfiConverterULong.write(value.`disconnectCount`, buf)
+    }
+}
+
+
+
 data class FfiDeviceInfo (
     var `deviceId`: kotlin.String, 
     var `deviceName`: kotlin.String, 
@@ -1197,6 +1420,66 @@ public object FfiConverterTypeFfiDeviceInfo: FfiConverterRustBuffer<FfiDeviceInf
 
 
 
+data class FfiTransferEvent (
+    var `timestampUs`: kotlin.ULong, 
+    var `relativeMs`: kotlin.ULong, 
+    var `stage`: kotlin.String, 
+    var `level`: kotlin.String, 
+    var `channel`: kotlin.String, 
+    var `chunkId`: kotlin.UInt?, 
+    var `durationUs`: kotlin.ULong?, 
+    var `bytes`: kotlin.ULong?, 
+    var `message`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiTransferEvent: FfiConverterRustBuffer<FfiTransferEvent> {
+    override fun read(buf: ByteBuffer): FfiTransferEvent {
+        return FfiTransferEvent(
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalUInt.read(buf),
+            FfiConverterOptionalULong.read(buf),
+            FfiConverterOptionalULong.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiTransferEvent) = (
+            FfiConverterULong.allocationSize(value.`timestampUs`) +
+            FfiConverterULong.allocationSize(value.`relativeMs`) +
+            FfiConverterString.allocationSize(value.`stage`) +
+            FfiConverterString.allocationSize(value.`level`) +
+            FfiConverterString.allocationSize(value.`channel`) +
+            FfiConverterOptionalUInt.allocationSize(value.`chunkId`) +
+            FfiConverterOptionalULong.allocationSize(value.`durationUs`) +
+            FfiConverterOptionalULong.allocationSize(value.`bytes`) +
+            FfiConverterString.allocationSize(value.`message`)
+    )
+
+    override fun write(value: FfiTransferEvent, buf: ByteBuffer) {
+            FfiConverterULong.write(value.`timestampUs`, buf)
+            FfiConverterULong.write(value.`relativeMs`, buf)
+            FfiConverterString.write(value.`stage`, buf)
+            FfiConverterString.write(value.`level`, buf)
+            FfiConverterString.write(value.`channel`, buf)
+            FfiConverterOptionalUInt.write(value.`chunkId`, buf)
+            FfiConverterOptionalULong.write(value.`durationUs`, buf)
+            FfiConverterOptionalULong.write(value.`bytes`, buf)
+            FfiConverterString.write(value.`message`, buf)
+    }
+}
+
+
+
 data class FfiTransferHandle (
     var `transferId`: kotlin.String
 ) {
@@ -1220,6 +1503,62 @@ public object FfiConverterTypeFfiTransferHandle: FfiConverterRustBuffer<FfiTrans
 
     override fun write(value: FfiTransferHandle, buf: ByteBuffer) {
             FfiConverterString.write(value.`transferId`, buf)
+    }
+}
+
+
+
+data class FfiTransferLogSummary (
+    var `transferId`: kotlin.String, 
+    var `fileName`: kotlin.String, 
+    var `fileSize`: kotlin.ULong, 
+    var `role`: kotlin.String, 
+    var `avgThroughputMbps`: kotlin.Double, 
+    var `primaryBottleneck`: kotlin.String, 
+    var `logFilePath`: kotlin.String, 
+    var `jsonFilePath`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiTransferLogSummary: FfiConverterRustBuffer<FfiTransferLogSummary> {
+    override fun read(buf: ByteBuffer): FfiTransferLogSummary {
+        return FfiTransferLogSummary(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiTransferLogSummary) = (
+            FfiConverterString.allocationSize(value.`transferId`) +
+            FfiConverterString.allocationSize(value.`fileName`) +
+            FfiConverterULong.allocationSize(value.`fileSize`) +
+            FfiConverterString.allocationSize(value.`role`) +
+            FfiConverterDouble.allocationSize(value.`avgThroughputMbps`) +
+            FfiConverterString.allocationSize(value.`primaryBottleneck`) +
+            FfiConverterString.allocationSize(value.`logFilePath`) +
+            FfiConverterString.allocationSize(value.`jsonFilePath`)
+    )
+
+    override fun write(value: FfiTransferLogSummary, buf: ByteBuffer) {
+            FfiConverterString.write(value.`transferId`, buf)
+            FfiConverterString.write(value.`fileName`, buf)
+            FfiConverterULong.write(value.`fileSize`, buf)
+            FfiConverterString.write(value.`role`, buf)
+            FfiConverterDouble.write(value.`avgThroughputMbps`, buf)
+            FfiConverterString.write(value.`primaryBottleneck`, buf)
+            FfiConverterString.write(value.`logFilePath`, buf)
+            FfiConverterString.write(value.`jsonFilePath`, buf)
     }
 }
 
@@ -1555,6 +1894,38 @@ public object FfiConverterTypeFfiTransportPreference: FfiConverterRustBuffer<Ffi
 /**
  * @suppress
  */
+public object FfiConverterOptionalUInt: FfiConverterRustBuffer<kotlin.UInt?> {
+    override fun read(buf: ByteBuffer): kotlin.UInt? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterUInt.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.UInt?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterUInt.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.UInt?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterUInt.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalULong: FfiConverterRustBuffer<kotlin.ULong?> {
     override fun read(buf: ByteBuffer): kotlin.ULong? {
         if (buf.get().toInt() == 0) {
@@ -1619,6 +1990,38 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeFfiBottleneckReport: FfiConverterRustBuffer<FfiBottleneckReport?> {
+    override fun read(buf: ByteBuffer): FfiBottleneckReport? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeFfiBottleneckReport.read(buf)
+    }
+
+    override fun allocationSize(value: FfiBottleneckReport?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeFfiBottleneckReport.allocationSize(value)
+        }
+    }
+
+    override fun write(value: FfiBottleneckReport?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeFfiBottleneckReport.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeFfiTransferProgress: FfiConverterRustBuffer<FfiTransferProgress?> {
     override fun read(buf: ByteBuffer): FfiTransferProgress? {
         if (buf.get().toInt() == 0) {
@@ -1651,6 +2054,62 @@ public object FfiConverterOptionalTypeFfiTransferProgress: FfiConverterRustBuffe
 /**
  * @suppress
  */
+public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.String>> {
+    override fun read(buf: ByteBuffer): List<kotlin.String> {
+        val len = buf.getInt()
+        return List<kotlin.String>(len) {
+            FfiConverterString.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.String>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterString.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.String>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterString.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeFfiChannelMetric: FfiConverterRustBuffer<List<FfiChannelMetric>> {
+    override fun read(buf: ByteBuffer): List<FfiChannelMetric> {
+        val len = buf.getInt()
+        return List<FfiChannelMetric>(len) {
+            FfiConverterTypeFfiChannelMetric.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiChannelMetric>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiChannelMetric.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiChannelMetric>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiChannelMetric.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeFfiDeviceInfo: FfiConverterRustBuffer<List<FfiDeviceInfo>> {
     override fun read(buf: ByteBuffer): List<FfiDeviceInfo> {
         val len = buf.getInt()
@@ -1669,6 +2128,62 @@ public object FfiConverterSequenceTypeFfiDeviceInfo: FfiConverterRustBuffer<List
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeFfiDeviceInfo.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeFfiTransferEvent: FfiConverterRustBuffer<List<FfiTransferEvent>> {
+    override fun read(buf: ByteBuffer): List<FfiTransferEvent> {
+        val len = buf.getInt()
+        return List<FfiTransferEvent>(len) {
+            FfiConverterTypeFfiTransferEvent.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiTransferEvent>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiTransferEvent.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiTransferEvent>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiTransferEvent.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeFfiTransferLogSummary: FfiConverterRustBuffer<List<FfiTransferLogSummary>> {
+    override fun read(buf: ByteBuffer): List<FfiTransferLogSummary> {
+        val len = buf.getInt()
+        return List<FfiTransferLogSummary>(len) {
+            FfiConverterTypeFfiTransferLogSummary.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiTransferLogSummary>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiTransferLogSummary.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiTransferLogSummary>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiTransferLogSummary.write(it, buf)
         }
     }
 }
@@ -1717,6 +2232,16 @@ public object FfiConverterSequenceTypeFfiTransferSummary: FfiConverterRustBuffer
     )
     }
     
+
+    @Throws(FfiTransferException::class) fun `exportTransferLogs`(`transferId`: kotlin.String, `outputDir`: kotlin.String?): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(FfiTransferException) { _status ->
+    UniffiLib.INSTANCE.uniffi_turbotransfer_core_fn_func_export_transfer_logs(
+        FfiConverterString.lower(`transferId`),FfiConverterOptionalString.lower(`outputDir`),_status)
+}
+    )
+    }
+    
  fun `getDevices`(): List<FfiDeviceInfo> {
             return FfiConverterSequenceTypeFfiDeviceInfo.lift(
     uniffiRustCall() { _status ->
@@ -1735,10 +2260,54 @@ public object FfiConverterSequenceTypeFfiTransferSummary: FfiConverterRustBuffer
     )
     }
     
+ fun `getTransferBottleneckReport`(`transferId`: kotlin.String): FfiBottleneckReport? {
+            return FfiConverterOptionalTypeFfiBottleneckReport.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_turbotransfer_core_fn_func_get_transfer_bottleneck_report(
+        FfiConverterString.lower(`transferId`),_status)
+}
+    )
+    }
+    
+ fun `getTransferLogJson`(`transferId`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_turbotransfer_core_fn_func_get_transfer_log_json(
+        FfiConverterString.lower(`transferId`),_status)
+}
+    )
+    }
+    
+ fun `getTransferLogs`(`transferId`: kotlin.String, `maxEvents`: kotlin.UInt?): List<FfiTransferEvent> {
+            return FfiConverterSequenceTypeFfiTransferEvent.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_turbotransfer_core_fn_func_get_transfer_logs(
+        FfiConverterString.lower(`transferId`),FfiConverterOptionalUInt.lower(`maxEvents`),_status)
+}
+    )
+    }
+    
  fun `getTransfers`(): List<FfiTransferSummary> {
             return FfiConverterSequenceTypeFfiTransferSummary.lift(
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_turbotransfer_core_fn_func_get_transfers(
+        _status)
+}
+    )
+    }
+    
+ fun `initLogger`()
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_turbotransfer_core_fn_func_init_logger(
+        _status)
+}
+    
+    
+ fun `listTransferLogs`(): List<FfiTransferLogSummary> {
+            return FfiConverterSequenceTypeFfiTransferLogSummary.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_turbotransfer_core_fn_func_list_transfer_logs(
         _status)
 }
     )
@@ -1761,6 +2330,14 @@ public object FfiConverterSequenceTypeFfiTransferSummary: FfiConverterRustBuffer
 }
     )
     }
+    
+ fun `setDataDirectory`(`path`: kotlin.String)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_turbotransfer_core_fn_func_set_data_directory(
+        FfiConverterString.lower(`path`),_status)
+}
+    
     
 
     @Throws(FfiTransferException::class) fun `startTransfer`(`filePath`: kotlin.String, `fileName`: kotlin.String?, `deviceId`: kotlin.String?, `transportPref`: FfiTransportPreference, `address`: kotlin.String?): FfiTransferHandle {
