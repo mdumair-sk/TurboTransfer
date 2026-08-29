@@ -19,6 +19,8 @@ import com.turbotransfer.presentation.main.TurboTransferApp
 import com.turbotransfer.presentation.theme.TurboTransferTheme
 import dagger.hilt.android.AndroidEntryPoint
 
+import androidx.activity.enableEdgeToEdge
+
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
@@ -57,6 +59,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
         requestRequiredPermissions()
@@ -105,6 +108,20 @@ class MainActivity : ComponentActivity() {
         }
         if (ungranted.isNotEmpty()) {
             permissionLauncher.launch(ungranted.toTypedArray())
+        }
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R && !android.os.Environment.isExternalStorageManager()) {
+            try {
+                val intent = android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = android.net.Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            } catch (_: Exception) {
+                try {
+                    val intent = android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                    startActivity(intent)
+                } catch (_: Exception) {}
+            }
         }
     }
 

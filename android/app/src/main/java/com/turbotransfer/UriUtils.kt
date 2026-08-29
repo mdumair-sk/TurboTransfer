@@ -186,24 +186,137 @@ object UriUtils {
     fun resolveDirectoryUri(context: Context, treeUri: Uri): List<SelectedFileInfo> {
         val result = mutableListOf<SelectedFileInfo>()
         try {
-            val docId = DocumentsContract.getTreeDocumentId(treeUri)
-            val dirPath = getRealPathFromUri(context, treeUri)
-            if (dirPath != null && File(dirPath).exists() && File(dirPath).isDirectory) {
-                collectFilesRecursively(File(dirPath), result)
-            } else {
-                // Fallback: try common root matching
-                if (docId.startsWith("primary:")) {
-                    val relPath = docId.substringAfter("primary:")
-                    val dir = File(Environment.getExternalStorageDirectory(), relPath)
-                    if (dir.exists() && dir.isDirectory) {
+            // 1. Try fast direct POSIX filesystem access first
+            val docId = try {
+                DocumentsContract.getTreeDocumentId(treeUri)
+            } catch (_: Exception) {
+                treeUri.lastPathSegment ?: ""
+            }
+
+            var directCollectionSuccess = false
+            val candidatePaths = mutableListOf<File>()
+
+            if (docId.startsWith("primary:")) {
+                val relPath = Uri.decode(docId.substringAfter("primary:"))
+                candidatePaths.add(File("/storage/emulated/0", relPath))
+                candidatePaths.add(File(Environment.getExternalStorageDirectory(), relPath))
+            } else if (docId.startsWith("raw:")) {
+                candidatePaths.add(File(docId.substring(4)))
+            } else if (docId.contains(":")) {
+                val parts = docId.split(":")
+                val type = parts[0]
+                val rel = Uri.decode(parts.getOrElse(1) { "" })
+                candidatePaths.add(File("/storage/$type", rel))
+            }
+
+            for (dir in candidatePaths) {
+                if (dir.exists() && dir.isDirectory && dir.canRead()) {
+                    val files = dir.listFiles()
+                    if (files != null) {
                         collectFilesRecursively(dir, result)
+                        if (result.isNotEmpty()) {
+                            directCollectionSuccess = true
+                            Log.i(TAG, "Successfully resolved ${result.size} files via direct filesystem from $dir")
+                            break
+                        }
                     }
                 }
+            }
+
+            // 2. If direct filesystem was restricted by Scoped Storage, use Storage Access Framework (SAF) tree query
+            if (!directCollectionSuccess) {
+                Log.i(TAG, "Falling back to SAF tree traversal for treeUri: $treeUri (docId=$docId)")
+                val rootDocId = try {
+                    DocumentsContract.getTreeDocumentId(treeUri)
+                } catch (_: Exception) {
+                    DocumentsContract.getDocumentId(treeUri)
+                }
+                traverseSafTreeRecursively(context, treeUri, rootDocId, result)
+                Log.i(TAG, "SAF tree traversal resolved ${result.size} files")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to resolve directory URI: $treeUri", e)
         }
         return result
+    }
+
+    private fun traverseSafTreeRecursively(
+        context: Context,
+        treeUri: Uri,
+        parentDocId: String,
+        result: MutableList<SelectedFileInfo>
+    ) {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE
+        )
+
+        try {
+            context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                val idCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val nameCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val mimeCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                val sizeCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
+
+                while (cursor.moveToNext()) {
+                    val childDocId = if (idCol != -1) cursor.getString(idCol) else continue
+                    val displayName = if (nameCol != -1) cursor.getString(nameCol) ?: "file" else "file"
+                    val mimeType = if (mimeCol != -1) cursor.getString(mimeCol) ?: "" else ""
+                    val sizeBytes = if (sizeCol != -1) cursor.getLong(sizeCol) else 0L
+
+                    if (mimeType == DocumentsContract.Document.MIME_TYPE_DIR) {
+                        // Recurse into subdirectory
+                        traverseSafTreeRecursively(context, treeUri, childDocId, result)
+                    } else {
+                        val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
+                        val fileInfo = resolveSelectedFile(context, docUri)
+                        if (fileInfo != null) {
+                            result.add(fileInfo)
+                        } else {
+                            // Stage fallback
+                            try {
+                                val stagingDir = File(context.cacheDir, "transfer_staging").apply { mkdirs() }
+                                val safeName = displayName.replace(Regex("[/\\\\:*?\"<>|]"), "_")
+                                val targetFile = File(stagingDir, safeName)
+
+                                if (!targetFile.exists() || sizeBytes == 0L || targetFile.length() != sizeBytes) {
+                                    context.contentResolver.openInputStream(docUri)?.use { input ->
+                                        FileOutputStream(targetFile).use { output ->
+                                            val buffer = ByteArray(256 * 1024)
+                                            var bytesRead: Int
+                                            while (input.read(buffer).also { bytesRead = it } != -1) {
+                                                output.write(buffer, 0, bytesRead)
+                                            }
+                                            output.flush()
+                                        }
+                                    }
+                                }
+
+                                if (targetFile.exists() && targetFile.length() > 0L) {
+                                    val ext = displayName.substringAfterLast('.', "")
+                                    result.add(
+                                        SelectedFileInfo(
+                                            path = targetFile.absolutePath,
+                                            displayName = displayName,
+                                            sizeBytes = targetFile.length(),
+                                            formattedSize = formatFileSize(targetFile.length()),
+                                            category = FileCategory.fromExtension(ext)
+                                        )
+                                    )
+                                }
+                            } catch (ex: Exception) {
+                                Log.w(TAG, "Failed to resolve SAF child doc $displayName: ${ex.message}")
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed querying SAF children for docId=$parentDocId", e)
+        }
     }
 
     private fun collectFilesRecursively(dir: File, result: MutableList<SelectedFileInfo>) {

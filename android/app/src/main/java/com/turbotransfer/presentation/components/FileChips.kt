@@ -1,19 +1,15 @@
 package com.turbotransfer.presentation.components
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -30,13 +26,12 @@ fun CategoryChip(
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        color = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Icon(
                 icon,
@@ -46,8 +41,8 @@ fun CategoryChip(
             )
             Text(
                 label,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 13.sp
+                fontWeight = FontWeight.Medium,
+                style = MaterialTheme.typography.bodyMedium
             )
         }
     }
@@ -58,25 +53,25 @@ fun SelectedFileItemChip(
     fileInfo: SelectedFileInfo,
     onRemove: () -> Unit
 ) {
+    val icon = when (fileInfo.category) {
+        FileCategory.IMAGE -> Icons.Default.Image
+        FileCategory.VIDEO -> Icons.Default.Videocam
+        FileCategory.AUDIO -> Icons.Default.Audiotrack
+        FileCategory.DOCUMENT -> Icons.Default.Description
+        FileCategory.APK -> Icons.Default.Android
+        FileCategory.FOLDER -> Icons.Default.Folder
+        else -> Icons.Default.InsertDriveFile
+    }
+
     Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            val icon = when (fileInfo.category) {
-                FileCategory.IMAGE -> Icons.Default.Image
-                FileCategory.VIDEO -> Icons.Default.Videocam
-                FileCategory.AUDIO -> Icons.Default.Audiotrack
-                FileCategory.DOCUMENT -> Icons.Default.InsertDriveFile
-                FileCategory.APK -> Icons.Default.Android
-                FileCategory.FOLDER -> Icons.Default.Folder
-                else -> Icons.Default.Description
-            }
             Icon(
                 icon,
                 contentDescription = null,
@@ -86,8 +81,8 @@ fun SelectedFileItemChip(
             Column {
                 Text(
                     fileInfo.displayName,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.widthIn(max = 120.dp)
@@ -95,6 +90,7 @@ fun SelectedFileItemChip(
                 Text(
                     fileInfo.formattedSize,
                     fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
