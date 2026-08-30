@@ -1,4 +1,4 @@
-﻿//! Ground-truth channel state tracking, in-flight accounting, and utilization.
+//! Ground-truth channel state tracking, in-flight accounting, and utilization.
 
 use std::collections::HashSet;
 use std::time::Instant;
@@ -45,6 +45,12 @@ pub struct ChannelTracker {
     pub total_bytes_acked: u64,
     pub disconnect_count: u32,
 
+    // Concurrency and throughput accounting
+    pub last_ack_time: Option<Instant>,
+    pub ack_window_start: Option<Instant>,
+    pub ack_window_bytes: u64,
+    pub last_inter_ack_us: Option<u64>,
+
     // Utilization tracking (time with >= 1 chunk in-flight)
     busy_time_us: u64,
     last_busy_start: Option<Instant>,
@@ -74,6 +80,10 @@ impl ChannelTracker {
             total_bytes_sent: 0,
             total_bytes_acked: 0,
             disconnect_count: 0,
+            last_ack_time: None,
+            ack_window_start: None,
+            ack_window_bytes: 0,
+            last_inter_ack_us: None,
             busy_time_us: 0,
             last_busy_start: None,
             consecutive_severe_samples: 0,
@@ -124,6 +134,26 @@ impl ChannelTracker {
             if let Some(start) = self.last_busy_start.take() {
                 self.busy_time_us += now.duration_since(start).as_micros() as u64;
             }
+        }
+
+        if let Some(last_ack) = self.last_ack_time {
+            let inter_us = now.duration_since(last_ack).as_micros() as u64;
+            if inter_us > 500 {
+                self.last_inter_ack_us = Some(inter_us);
+            }
+        }
+        self.last_ack_time = Some(now);
+
+        if let Some(win_start) = self.ack_window_start {
+            if now.duration_since(win_start).as_millis() >= 1000 {
+                self.ack_window_start = Some(now);
+                self.ack_window_bytes = bytes;
+            } else {
+                self.ack_window_bytes += bytes;
+            }
+        } else {
+            self.ack_window_start = Some(now);
+            self.ack_window_bytes = bytes;
         }
 
         self.total_chunks_acked += 1;
@@ -239,6 +269,64 @@ impl ChannelTracker {
             0.0
         } else {
             ((total_busy as f64) / (elapsed_us as f64) * 100.0).clamp(0.0, 100.0)
+        }
+    }
+
+    /// Returns the number of chunks currently in-flight on this channel.
+    pub fn in_flight_count(&self) -> usize {
+        self.in_flight_chunks.len()
+    }
+
+    /// Returns the total bytes currently in-flight on this channel.
+    pub fn in_flight_bytes(&self) -> u64 {
+        self.in_flight_bytes
+    }
+
+    /// Returns the inter-ACK arrival interval in microseconds if available.
+    pub fn inter_ack_interval_us(&self) -> Option<u64> {
+        self.last_inter_ack_us
+    }
+
+    /// Calculates rolling goodput in MB/s over a bounded interval.
+    pub fn rolling_goodput_mbps(&self) -> f64 {
+        if self.recent_samples.is_empty() {
+            return 0.0;
+        }
+
+        // 1. If inter-ACK interval is available, calculate pipelined goodput
+        if let Some(inter_us) = self.last_inter_ack_us {
+            let dt = (inter_us as f64) / 1_000_000.0;
+            if dt >= 0.0005 {
+                let last_b = self.recent_samples.last().map(|s| s.bytes).unwrap_or(0);
+                return ((last_b as f64) / (1024.0 * 1024.0)) / dt;
+            }
+        }
+
+        // 2. Multi-sample elapsed duration in recent window
+        let now = Instant::now();
+        let valid_samples: Vec<&AckSample> = self
+            .recent_samples
+            .iter()
+            .filter(|s| now.duration_since(s.timestamp).as_millis() <= 1000)
+            .collect();
+
+        if valid_samples.len() >= 2 {
+            let oldest = valid_samples.first().unwrap().timestamp;
+            let newest = valid_samples.last().unwrap().timestamp;
+            let dt = newest.duration_since(oldest).as_secs_f64();
+            if dt >= 0.05 {
+                let sum_bytes: u64 = valid_samples.iter().map(|s| s.bytes).sum();
+                return ((sum_bytes as f64) / (1024.0 * 1024.0)) / dt;
+            }
+        }
+
+        // 3. Fallback to latest sample turnaround
+        let last_sample = self.recent_samples.last().unwrap();
+        let sec = (last_sample.ack_turnaround_us as f64) / 1_000_000.0;
+        if sec > 0.0001 {
+            ((last_sample.bytes as f64) / (1024.0 * 1024.0)) / sec
+        } else {
+            0.0
         }
     }
 

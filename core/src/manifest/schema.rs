@@ -48,6 +48,8 @@ pub struct TransferMeta {
     pub created_at: String,
     pub updated_at: String,
     pub transport_stats: TransportStatsMap,
+    #[serde(default)]
+    pub source_file_path: Option<String>,
 }
 
 impl TransferMeta {
@@ -76,6 +78,7 @@ impl TransferMeta {
             created_at: now.clone(),
             updated_at: now,
             transport_stats: TransportStatsMap::default(),
+            source_file_path: None,
         }
     }
 }

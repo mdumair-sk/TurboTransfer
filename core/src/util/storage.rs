@@ -69,6 +69,54 @@ pub fn preallocate_file(file: &File, file_size: u64) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Sanitizes an untrusted incoming filename to prevent path traversal (TRD §12, C1).
+///
+/// Strips directory components (`/`, `\`), traversal markers (`..`, `.`),
+/// invalid filesystem characters, control characters, and leading/trailing whitespace/dots.
+pub fn sanitize_filename(name: &str) -> String {
+    // 1. Take only the file name component (removes any directory path prefix)
+    let base = Path::new(name)
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or(name);
+
+    // 2. Filter out control characters, nulls, and illegal path separators
+    let filtered: String = base
+        .chars()
+        .filter(|c| !c.is_control() && *c != '/' && *c != '\\' && *c != '\0')
+        .collect();
+
+    // 3. Trim whitespace and dots which could cause issues on Windows / POSIX
+    let trimmed = filtered.trim().trim_matches('.').to_string();
+
+    // 4. Reject relative path specifiers and empty names
+    if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
+        "download_unnamed".to_string()
+    } else {
+        trimmed
+    }
+}
+
+/// Resolves and validates that the target file and `.part` file reside strictly within `dest_dir`.
+pub fn resolve_secure_paths<P: AsRef<Path>>(
+    dest_dir: P,
+    file_name: &str,
+) -> Result<(std::path::PathBuf, std::path::PathBuf), std::io::Error> {
+    let dest = dest_dir.as_ref();
+    let safe_name = sanitize_filename(file_name);
+    let part_path = dest.join(format!("{}.part", safe_name));
+    let final_path = dest.join(&safe_name);
+
+    if !part_path.starts_with(dest) || !final_path.starts_with(dest) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("Path traversal attempt detected in filename: {:?}", file_name),
+        ));
+    }
+
+    Ok((part_path, final_path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,5 +135,29 @@ mod tests {
         let meta = file.metadata().unwrap();
         advise_sequential_read(&file, meta.len());
         assert_eq!(meta.len(), 26);
+    }
+
+    #[test]
+    fn test_sanitize_filename_traversal_prevention() {
+        assert_eq!(sanitize_filename("../../etc/passwd"), "passwd");
+        assert_eq!(sanitize_filename("..\\..\\Windows\\System32\\cmd.exe"), "cmd.exe");
+        assert_eq!(sanitize_filename("/var/log/syslog"), "syslog");
+        assert_eq!(sanitize_filename("C:\\Users\\Admin\\evil.bat"), "evil.bat");
+        assert_eq!(sanitize_filename("..."), "download_unnamed");
+        assert_eq!(sanitize_filename(".."), "download_unnamed");
+        assert_eq!(sanitize_filename("."), "download_unnamed");
+        assert_eq!(sanitize_filename("  my report.pdf  "), "my report.pdf");
+        assert_eq!(sanitize_filename("my\0evil\nfile.txt"), "myevilfile.txt");
+    }
+
+    #[test]
+    fn test_resolve_secure_paths() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let dest = temp_dir.path();
+        let (part, final_p) = resolve_secure_paths(dest, "../../evil.sh").unwrap();
+        assert!(part.starts_with(dest));
+        assert!(final_p.starts_with(dest));
+        assert_eq!(final_p.file_name().unwrap(), "evil.sh");
+        assert_eq!(part.file_name().unwrap(), "evil.sh.part");
     }
 }

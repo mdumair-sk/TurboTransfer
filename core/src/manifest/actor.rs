@@ -129,7 +129,7 @@ impl MetaActor {
         // Flush initial meta to disk
         actor.flush_sync();
 
-        let handle = tokio::spawn(async move {
+        let handle = crate::util::runtime::spawn_task(async move {
             actor.run().await;
         });
 

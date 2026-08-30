@@ -16,6 +16,7 @@ use crate::protocol::{
     encode_frame, ChunkAckData, ChunkDataPayload, ChunkNackData, CompleteData,
     HelloData, Message, ProtocolError, TransferAcceptData, TransferOfferData,
 };
+use crate::scheduler::{ChannelPerformanceModel, ChannelTracker, WindowController};
 use crate::transport::{StreamTransport, Transport, TransportError, TransportKind};
 use crate::util::telemetry::{
     export_and_clean_telemetry, get_or_create_telemetry, EventLevel, TransferStage,
@@ -616,7 +617,9 @@ where
 async fn handle_multipath_ack_frame(
     frame: Message,
     is_usb: bool,
-    worker_in_flight: &mut std::collections::HashSet<u32>,
+    tracker: &mut ChannelTracker,
+    model: &mut ChannelPerformanceModel,
+    window: &mut WindowController,
     worker_in_flight_times: &mut std::collections::HashMap<u32, std::time::Instant>,
     completed: &std::sync::Arc<parking_lot::Mutex<std::collections::HashSet<u32>>>,
     completed_count: &std::sync::Arc<std::sync::atomic::AtomicUsize>,
@@ -627,17 +630,32 @@ async fn handle_multipath_ack_frame(
     chunks_done: &std::sync::Arc<std::sync::atomic::AtomicU32>,
     telemetry: Option<&std::sync::Arc<TransferTelemetry>>,
     channel_name: &str,
+    last_socket_duration_us: u64,
 ) -> Result<(), TransferSessionError> {
     match frame {
         Message::ChunkAck(ack) => {
-            worker_in_flight.remove(&ack.chunk_id);
             let bytes_len = plan_map.get(&ack.chunk_id).map_or(0, |e| e.payload_length as u64);
-            if let Some(t_disp) = worker_in_flight_times.remove(&ack.chunk_id) {
+            let rtt_us = if let Some(t_disp) = worker_in_flight_times.remove(&ack.chunk_id) {
                 let rtt_ms = t_disp.elapsed().as_secs_f64() * 1000.0;
                 if let Some(tel) = telemetry {
                     tel.record_chunk_ack(channel_name, ack.chunk_id, rtt_ms, bytes_len);
                 }
+                t_disp.elapsed().as_micros() as u64
+            } else {
+                50_000
+            };
+
+            if let Some(sample) = tracker.record_chunk_ack(
+                ack.chunk_id,
+                bytes_len,
+                rtt_us,
+                last_socket_duration_us,
+                ack.receiver_verify_us,
+            ) {
+                model.update_from_tracker_and_sample(tracker, &sample);
+                window.evaluate_and_adjust(tracker, model);
             }
+
             let is_new = completed.lock().insert(ack.chunk_id);
             if is_new {
                 completed_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -651,14 +669,27 @@ async fn handle_multipath_ack_frame(
         }
         Message::BatchChunkAck(batch) => {
             for cid in batch.chunk_ids {
-                worker_in_flight.remove(&cid);
                 let bytes_len = plan_map.get(&cid).map_or(0, |e| e.payload_length as u64);
-                if let Some(t_disp) = worker_in_flight_times.remove(&cid) {
+                let rtt_us = if let Some(t_disp) = worker_in_flight_times.remove(&cid) {
                     let rtt_ms = t_disp.elapsed().as_secs_f64() * 1000.0;
                     if let Some(tel) = telemetry {
                         tel.record_chunk_ack(channel_name, cid, rtt_ms, bytes_len);
                     }
+                    t_disp.elapsed().as_micros() as u64
+                } else {
+                    50_000
+                };
+
+                if let Some(sample) = tracker.record_chunk_ack(
+                    cid,
+                    bytes_len,
+                    rtt_us,
+                    last_socket_duration_us,
+                    None,
+                ) {
+                    model.update_from_tracker_and_sample(tracker, &sample);
                 }
+
                 let is_new = completed.lock().insert(cid);
                 if is_new {
                     completed_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -670,9 +701,10 @@ async fn handle_multipath_ack_frame(
                     }
                 }
             }
+            window.evaluate_and_adjust(tracker, model);
         }
         Message::ChunkNack(nack) => {
-            worker_in_flight.remove(&nack.chunk_id);
+            tracker.record_chunk_nack(nack.chunk_id, &nack.reason);
             worker_in_flight_times.remove(&nack.chunk_id);
             if let Some(tel) = telemetry {
                 tel.record_chunk_nack(channel_name, nack.chunk_id, &nack.reason);
@@ -1025,13 +1057,15 @@ pub async fn send_file_session_multipath(
         };
 
         let handle = tokio::spawn(async move {
-            let worker_pipeline_depth: usize = if is_usb { 16 } else { 8 };
-            let mut worker_in_flight = std::collections::HashSet::new();
+            let mut tracker = ChannelTracker::new(channel_name.clone());
+            let mut model = ChannelPerformanceModel::new(channel_name.clone(), if is_usb { 45.0 } else { 20.0 });
+            let mut window = if is_usb { WindowController::for_usb() } else { WindowController::for_wifi() };
             let mut worker_in_flight_times = std::collections::HashMap::new();
+            let mut last_socket_send_us: u64 = 1_000;
 
             loop {
                 if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
-                    if worker_in_flight.is_empty() {
+                    if tracker.in_flight_count() == 0 {
                         break;
                     }
                 }
@@ -1039,7 +1073,7 @@ pub async fn send_file_session_multipath(
                 if completed_count.load(std::sync::atomic::Ordering::Relaxed) >= total_chunks {
                     cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
                     prepared_rx.close();
-                    if worker_in_flight.is_empty() {
+                    if tracker.in_flight_count() == 0 {
                         break;
                     }
                 }
@@ -1073,7 +1107,9 @@ pub async fn send_file_session_multipath(
                                 handle_multipath_ack_frame(
                                     frame,
                                     is_usb,
-                                    &mut worker_in_flight,
+                                    &mut tracker,
+                                    &mut model,
+                                    &mut window,
                                     &mut worker_in_flight_times,
                                     &completed,
                                     &completed_count,
@@ -1084,6 +1120,7 @@ pub async fn send_file_session_multipath(
                                     &chunks_done,
                                     telemetry_worker.as_ref(),
                                     &channel_name,
+                                    last_socket_send_us,
                                 ).await?;
                                 if completed_count.load(std::sync::atomic::Ordering::Relaxed) >= total_chunks {
                                     cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1093,7 +1130,8 @@ pub async fn send_file_session_multipath(
                             }
                             Ok(None) | Err(_) => {
                                 // Transport disconnected
-                                for cid in worker_in_flight.drain() {
+                                tracker.record_disconnect("Transport disconnected / EOF");
+                                for cid in tracker.in_flight_chunks.drain() {
                                     worker_in_flight_times.remove(&cid);
                                     if let Some(e) = plan_map.get(&cid) {
                                         let _ = retry_tx.send(e.clone());
@@ -1107,7 +1145,7 @@ pub async fn send_file_session_multipath(
                             }
                         }
                     }
-                    prepared_res = prepared_rx.recv(), if worker_in_flight.len() < worker_pipeline_depth && !cancelled.load(std::sync::atomic::Ordering::Relaxed) => {
+                    prepared_res = prepared_rx.recv(), if tracker.in_flight_count() < window.current_window && !cancelled.load(std::sync::atomic::Ordering::Relaxed) => {
                         match prepared_res {
                             Ok(prepared) => {
                                 let chunk_id = prepared.entry.chunk_id;
@@ -1123,8 +1161,9 @@ pub async fn send_file_session_multipath(
 
                                 let t_s0 = std::time::Instant::now();
                                 if let Err(e) = transport.send_frame(&chunk_msg).await {
+                                    tracker.record_disconnect(&format!("Send error: {}", e));
                                     let _ = retry_tx.send(prepared.entry);
-                                    for cid in worker_in_flight.drain() {
+                                    for cid in tracker.in_flight_chunks.drain() {
                                         worker_in_flight_times.remove(&cid);
                                         if let Some(e) = plan_map.get(&cid) {
                                             let _ = retry_tx.send(e.clone());
@@ -1137,6 +1176,8 @@ pub async fn send_file_session_multipath(
                                     return Ok((idx, transport, false));
                                 }
                                 let send_us = t_s0.elapsed().as_micros() as u64;
+                                last_socket_send_us = send_us;
+                                tracker.record_chunk_sent(chunk_id, prepared.entry.payload_length as u64);
                                 if let Some(ref tel) = telemetry_worker {
                                     tel.record_chunk_sent(&channel_name, chunk_id, prepared.entry.payload_length as u64, send_us);
                                 }
@@ -1145,12 +1186,10 @@ pub async fn send_file_session_multipath(
                                 if let Message::ChunkData(d) = chunk_msg {
                                     let _ = recycle_tx.send(d.payload);
                                 }
-
-                                worker_in_flight.insert(chunk_id);
                             }
                             Err(_) => {
                                 // Channel closed (reader finished or encountered error)
-                                if worker_in_flight.is_empty() {
+                                if tracker.in_flight_count() == 0 {
                                     break;
                                 }
                             }
@@ -1176,6 +1215,7 @@ pub async fn send_file_session_multipath(
     }
 
     is_cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+    prepared_rx.close();
     drop(shared_retry_tx);
     drop(shared_recycle_tx);
     let _ = reader_handle.await;
@@ -1186,6 +1226,12 @@ pub async fn send_file_session_multipath(
     };
 
     if final_done < plan.len() {
+        if transfer_control_status(transfer_id) == Some(TransferStatus::Paused) {
+            return Err(TransferSessionError::Paused);
+        }
+        if transfer_control_status(transfer_id) == Some(TransferStatus::Cancelled) {
+            return Err(TransferSessionError::Cancelled);
+        }
         telemetry.mark_failed("All multipath transports disconnected before completing transfer");
         let data_dir = default_data_dir();
         export_and_clean_telemetry(transfer_id, &data_dir);
@@ -1346,8 +1392,7 @@ where
 
     // 5. Create and pre-allocate .part file, keeping handle open for the entire session
     std::fs::create_dir_all(dest_dir)?;
-    let part_path = dest_dir.join(format!("{}.part", offer.file_name));
-    let final_path = dest_dir.join(&offer.file_name);
+    let (part_path, final_path) = crate::util::storage::resolve_secure_paths(dest_dir, &offer.file_name)?;
 
     let mut file = OpenOptions::new()
         .read(true)
@@ -1555,6 +1600,13 @@ where
                 )));
             }
         }
+    }
+
+    if transfer_control_status(offer.transfer_id) == Some(TransferStatus::Paused) {
+        return Err(TransferSessionError::Paused);
+    }
+    if transfer_control_status(offer.transfer_id) == Some(TransferStatus::Cancelled) {
+        return Err(TransferSessionError::Cancelled);
     }
 
     Err(TransferSessionError::UnexpectedMessage(

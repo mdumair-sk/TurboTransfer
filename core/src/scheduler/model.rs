@@ -19,7 +19,9 @@ pub struct ChannelPerformanceModel {
     pub channel_name: String,
     pub initial_capacity_mbps: f64,
 
-    // EWMA and variance values
+    // EWMA and variance values (Goodput vs RTT decoupled)
+    pub goodput_ewma_mbps: f64,
+    pub goodput_variance: f64,
     pub throughput_ewma_mbps: f64,
     pub throughput_variance: f64,
     pub ack_turnaround_ewma_us: f64,
@@ -43,6 +45,8 @@ impl ChannelPerformanceModel {
         Self {
             channel_name,
             initial_capacity_mbps,
+            goodput_ewma_mbps: 0.0,
+            goodput_variance: 0.0,
             throughput_ewma_mbps: 0.0,
             throughput_variance: 0.0,
             ack_turnaround_ewma_us: 0.0,
@@ -58,7 +62,7 @@ impl ChannelPerformanceModel {
         }
     }
 
-    /// Ingests a new ACK sample from ChannelTracker and updates EWMAs and variances.
+    /// Ingests a new ACK sample and updates EWMAs and variances.
     pub fn update_from_sample(&mut self, sample: &AckSample) {
         let sample_sec = (sample.ack_turnaround_us as f64) / 1_000_000.0;
         let sample_mbps = if sample_sec > 0.00001 {
@@ -66,19 +70,42 @@ impl ChannelPerformanceModel {
         } else {
             0.0
         };
+        self.apply_goodput_sample(sample_mbps, sample);
+    }
 
-        // 1. Throughput EWMA & Variance
-        if self.throughput_ewma_mbps == 0.0 {
+    /// Ingests a new ACK sample using rolling goodput from ChannelTracker to decouple RTT from bandwidth.
+    pub fn update_from_tracker_and_sample(&mut self, tracker: &ChannelTracker, sample: &AckSample) {
+        let rolling_mbps = tracker.rolling_goodput_mbps();
+        let sample_mbps = if rolling_mbps > 0.0 {
+            rolling_mbps
+        } else {
+            let sample_sec = (sample.ack_turnaround_us as f64) / 1_000_000.0;
+            if sample_sec > 0.00001 {
+                ((sample.bytes as f64) / (1024.0 * 1024.0)) / sample_sec
+            } else {
+                0.0
+            }
+        };
+        self.apply_goodput_sample(sample_mbps, sample);
+    }
+
+    fn apply_goodput_sample(&mut self, sample_mbps: f64, sample: &AckSample) {
+        // 1. Goodput / Throughput EWMA & Variance
+        if self.goodput_ewma_mbps == 0.0 {
+            self.goodput_ewma_mbps = sample_mbps;
             self.throughput_ewma_mbps = sample_mbps;
+            self.goodput_variance = 0.0;
             self.throughput_variance = 0.0;
         } else {
-            let diff = sample_mbps - self.throughput_ewma_mbps;
-            self.throughput_ewma_mbps += self.alpha_throughput * diff;
-            self.throughput_variance = (1.0 - self.alpha_throughput) * self.throughput_variance
+            let diff = sample_mbps - self.goodput_ewma_mbps;
+            self.goodput_ewma_mbps += self.alpha_throughput * diff;
+            self.throughput_ewma_mbps = self.goodput_ewma_mbps;
+            self.goodput_variance = (1.0 - self.alpha_throughput) * self.goodput_variance
                 + self.alpha_throughput * diff * diff;
+            self.throughput_variance = self.goodput_variance;
         }
 
-        // 2. ACK Turnaround EWMA & Variance
+        // 2. ACK Turnaround EWMA & Variance (pure RTT latency)
         let ack_us = sample.ack_turnaround_us as f64;
         if self.ack_turnaround_ewma_us == 0.0 {
             self.ack_turnaround_ewma_us = ack_us;
@@ -102,9 +129,9 @@ impl ChannelPerformanceModel {
                 + self.alpha_socket * diff * diff;
         }
 
-        // 4. Update Capacity Estimate (peak observed rolling vs baseline)
+        // 4. Update Capacity Estimate (bounded and smoothed)
         if sample_mbps > self.estimated_capacity_mbps {
-            self.estimated_capacity_mbps = sample_mbps;
+            self.estimated_capacity_mbps = self.estimated_capacity_mbps * 0.90 + sample_mbps * 0.10;
         } else {
             self.estimated_capacity_mbps = self.estimated_capacity_mbps * 0.98 + sample_mbps * 0.02;
         }
@@ -128,21 +155,54 @@ impl ChannelPerformanceModel {
         }
     }
 
-    /// Predicts completion time in microseconds for a new chunk of given size on this channel.
+    /// Predicts completion time in microseconds for a new chunk using sliding window queueing.
     pub fn estimate_completion_time_us(&self, tracker: &ChannelTracker, chunk_size: usize) -> u64 {
-        let total_work_bytes = tracker.in_flight_bytes + (chunk_size as u64);
-        let work_mb = (total_work_bytes as f64) / (1024.0 * 1024.0);
+        // Default window assumed to be in-flight + 1 if unspecified
+        let assumed_win = tracker.in_flight_count().max(1);
+        self.estimate_completion_time_with_window(tracker, assumed_win, chunk_size)
+    }
+
+    /// Predicts completion time in microseconds for a new chunk of given size on this channel given current dynamic window.
+    pub fn estimate_completion_time_with_window(
+        &self,
+        tracker: &ChannelTracker,
+        current_window: usize,
+        chunk_size: usize,
+    ) -> u64 {
+        let chunk_mb = (chunk_size as f64) / (1024.0 * 1024.0);
 
         let effective_mbps = match tracker.state {
             ChannelState::Unknown => self.initial_capacity_mbps.max(1.0),
-            ChannelState::WarmingUp => (self.initial_capacity_mbps * 0.5).max(self.throughput_ewma_mbps).max(1.0),
-            ChannelState::Active => self.throughput_ewma_mbps.max(1.0),
-            ChannelState::Degraded => (self.throughput_ewma_mbps * 0.2).max(0.5),
-            ChannelState::Probing => (self.throughput_ewma_mbps * 0.6).max(1.0),
+            ChannelState::WarmingUp => (self.initial_capacity_mbps * 0.5).max(self.goodput_ewma_mbps).max(1.0),
+            ChannelState::Active => self.goodput_ewma_mbps.max(1.0),
+            ChannelState::Degraded => (self.goodput_ewma_mbps * 0.2).max(0.5),
+            ChannelState::Probing => (self.goodput_ewma_mbps * 0.6).max(1.0),
         };
 
-        let est_seconds = work_mb / effective_mbps;
-        (est_seconds * 1_000_000.0) as u64
+        let in_flight_count = tracker.in_flight_count();
+        let queue_delay_us = if in_flight_count < current_window {
+            0.0
+        } else {
+            let excess = (in_flight_count - current_window + 1) as f64;
+            ((excess * chunk_mb) / effective_mbps) * 1_000_000.0
+        };
+
+        let baseline_completion_us = if self.ack_turnaround_ewma_us > 0.0 {
+            self.ack_turnaround_ewma_us
+        } else {
+            (chunk_mb / effective_mbps) * 1_000_000.0
+        };
+
+        let total_est = queue_delay_us + baseline_completion_us;
+        let state_multiplier = match tracker.state {
+            ChannelState::Unknown => 1.0,
+            ChannelState::WarmingUp => 1.05,
+            ChannelState::Active => 1.0,
+            ChannelState::Degraded => 2.5,
+            ChannelState::Probing => 1.3,
+        };
+
+        (total_est * state_multiplier) as u64
     }
 
     /// Registers a scheduling prediction before chunk send.

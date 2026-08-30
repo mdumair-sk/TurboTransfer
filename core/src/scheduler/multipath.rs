@@ -9,6 +9,9 @@ use uuid::Uuid;
 
 use super::buffer_pool::BufferPool;
 use super::metrics::ThroughputTracker;
+use super::model::ChannelPerformanceModel;
+use super::tracker::ChannelTracker;
+use super::window::WindowController;
 use crate::checksum::compute_xxhash64;
 use crate::chunk::{calculate_chunk_plan, read_chunk_at, total_chunks};
 use crate::manifest::actor::{MetaActorHandle, TransportType};
@@ -38,8 +41,8 @@ impl Default for SchedulerConfig {
             max_in_flight_per_transport: DEFAULT_MAX_IN_FLIGHT_PER_TRANSPORT,
             buffer_count: DEFAULT_BUFFER_COUNT,
             chunk_size: 64 * 1024 * 1024, // 64 MiB default
-            enable_dynamic_scheduler: false,
-            enable_dynamic_window: false,
+            enable_dynamic_scheduler: true,
+            enable_dynamic_window: true,
         }
     }
 }
@@ -64,6 +67,15 @@ pub struct SchedulerDecision {
     pub reason: String,
 }
 
+/// Registered channel entry in the multipath scheduler.
+struct ScheduledTransport {
+    transport: Arc<tokio::sync::Mutex<Box<dyn Transport>>>,
+    kind: TransportKind,
+    name: String,
+    tracker: ChannelTracker,
+    model: ChannelPerformanceModel,
+    window: WindowController,
+}
 
 /// Dynamic rate-adaptive multipath chunk scheduler (§10).
 pub struct MultipathScheduler {
@@ -78,7 +90,7 @@ pub struct MultipathScheduler {
     in_flight: Arc<Mutex<HashMap<u32, (TransportKind, Instant)>>>,
     completed_set: Arc<Mutex<std::collections::HashSet<u32>>>,
     completed_chunks: Arc<AtomicU32>,
-    transports: Arc<Mutex<Vec<Arc<tokio::sync::Mutex<Box<dyn Transport>>>>>>,
+    transports: Arc<Mutex<Vec<ScheduledTransport>>>,
     metrics: Arc<ThroughputTracker>,
     status: Arc<Mutex<TransferStatus>>,
     manifest_actor: Option<MetaActorHandle>,
@@ -132,8 +144,34 @@ impl MultipathScheduler {
 
     /// Registers an active transport with the multipath scheduler.
     pub async fn add_transport(&self, transport: Box<dyn Transport>) {
+        let kind = transport.kind();
+        let name = match kind {
+            TransportKind::Usb => "USB".to_string(),
+            TransportKind::WifiDirect => "Wi-Fi".to_string(),
+            TransportKind::Tcp => "TCP".to_string(),
+        };
+
+        let initial_cap = match kind {
+            TransportKind::Usb => 45.0,
+            _ => 20.0,
+        };
+
+        let window = match kind {
+            TransportKind::Usb => WindowController::for_usb(),
+            _ => WindowController::for_wifi(),
+        };
+
+        let scheduled = ScheduledTransport {
+            kind,
+            name: name.clone(),
+            tracker: ChannelTracker::new(name.clone()),
+            model: ChannelPerformanceModel::new(name, initial_cap),
+            window,
+            transport: Arc::new(tokio::sync::Mutex::new(transport)),
+        };
+
         let mut list = self.transports.lock().await;
-        list.push(Arc::new(tokio::sync::Mutex::new(transport)));
+        list.push(scheduled);
         self.pause_notify.notify_waiters();
     }
 
@@ -181,6 +219,49 @@ impl MultipathScheduler {
         info!("Multipath transfer {} cancelled", self.transfer_id);
     }
 
+    /// Evaluates all channels and selects the best transport candidate with available window capacity.
+    pub async fn select_best_channel(&self, chunk_size: usize) -> Option<(usize, SchedulerDecision)> {
+        let list = self.transports.lock().await;
+        if list.is_empty() {
+            return None;
+        }
+
+        let mut best_idx = None;
+        let mut min_pred_us = u64::MAX;
+        let mut candidates_eval = Vec::with_capacity(list.len());
+
+        for (idx, st) in list.iter().enumerate() {
+            let in_flight = st.tracker.in_flight_count();
+            let cur_win = st.window.current_window;
+            let est_us = st.model.estimate_completion_time_with_window(&st.tracker, cur_win, chunk_size);
+
+            candidates_eval.push(CandidateEval {
+                channel_name: st.name.clone(),
+                ewma_throughput_mbps: if st.model.goodput_ewma_mbps > 0.0 { st.model.goodput_ewma_mbps } else { st.model.throughput_ewma_mbps },
+                in_flight_bytes: st.tracker.in_flight_bytes(),
+                estimated_completion_us: est_us,
+                max_window: cur_win,
+                current_in_flight: in_flight,
+            });
+
+            if in_flight < cur_win && est_us < min_pred_us {
+                min_pred_us = est_us;
+                best_idx = Some(idx);
+            }
+        }
+
+        best_idx.map(|idx| {
+            let selected_name = list[idx].name.clone();
+            let decision = SchedulerDecision {
+                chunk_id: 0,
+                selected_channel: selected_name.clone(),
+                candidates: candidates_eval,
+                reason: format!("Lowest predicted completion time: {} us on {}", min_pred_us, selected_name),
+            };
+            (idx, decision)
+        })
+    }
+
     /// Runs the sender multipath scheduler loop until all chunks are completed or cancelled.
     pub async fn run_sender(&self) -> Result<(), TransportError> {
         info!(
@@ -192,7 +273,6 @@ impl MultipathScheduler {
         let plan = calculate_chunk_plan(self.file_size, self.chunk_size as u32);
 
         while !self.cancelled.load(Ordering::Relaxed) {
-            // Check if transfer is completed
             if self.completed_chunks.load(Ordering::Relaxed) >= self.total_chunks_count {
                 let mut st = self.status.lock().await;
                 *st = TransferStatus::Completed;
@@ -200,7 +280,6 @@ impl MultipathScheduler {
                 return Ok(());
             }
 
-            // Check if paused
             {
                 let st = *self.status.lock().await;
                 if st == TransferStatus::Paused {
@@ -210,113 +289,89 @@ impl MultipathScheduler {
                 }
             }
 
-            // Get active transports
-            let active_transports = {
-                let list = self.transports.lock().await;
-                list.clone()
+            // Candidate evaluation across transports
+            let selection = self.select_best_channel(self.chunk_size).await;
+
+            let (chosen_idx, _decision) = match selection {
+                Some(sel) => sel,
+                None => {
+                    // All channels at capacity or no transports
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    continue;
+                }
             };
 
-            if active_transports.is_empty() {
-                warn!("No active transports available -> moving transfer to Paused state");
-                let mut st = self.status.lock().await;
-                *st = TransferStatus::Paused;
-                if let Some(actor) = &self.manifest_actor {
-                    actor.pause().await;
+            // Pull next chunk
+            let next_chunk_id = {
+                let mut queue = self.pending_chunks.lock().await;
+                queue.pop_front()
+            };
+
+            let chunk_id = match next_chunk_id {
+                Some(id) => id,
+                None => {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    continue;
                 }
-                self.pause_notify.notified().await;
-                continue;
+            };
+
+            // Read chunk asynchronously from disk
+            let entry = &plan[chunk_id as usize];
+            let payload = match read_chunk_at(&self.file_path, entry.file_offset, entry.payload_length) {
+                Ok(data) => data,
+                Err(e) => {
+                    error!("Failed to read chunk #{} from disk: {} -> requeueing", chunk_id, e);
+                    let mut queue = self.pending_chunks.lock().await;
+                    queue.push_front(chunk_id);
+                    continue;
+                }
+            };
+
+            let checksum = compute_xxhash64(&payload);
+            let chunk_msg = Message::ChunkData(ChunkDataPayload {
+                transfer_id: self.transfer_id,
+                file_id: self.file_id,
+                chunk_id,
+                file_offset: entry.file_offset,
+                payload_length: entry.payload_length,
+                checksum,
+                payload: payload.to_vec(),
+            });
+
+            // Send on selected transport
+            let (transport_arc, kind) = {
+                let mut list = self.transports.lock().await;
+                if chosen_idx >= list.len() {
+                    let mut queue = self.pending_chunks.lock().await;
+                    queue.push_front(chunk_id);
+                    continue;
+                }
+                let st = &mut list[chosen_idx];
+                st.tracker.record_chunk_sent(chunk_id, entry.payload_length as u64);
+                (st.transport.clone(), st.kind)
+            };
+
+            {
+                let mut map = self.in_flight.lock().await;
+                map.insert(chunk_id, (kind, Instant::now()));
             }
 
-            // Iterate over transports and dispatch chunks when under in-flight capacity (§10.1)
-            let mut dispatched_any = false;
-
-            for transport_arc in &active_transports {
-                let mut transport_guard = transport_arc.lock().await;
-                let kind = transport_guard.kind();
-
-                if !transport_guard.is_connected() {
-                    continue;
+            let mut transport_guard = transport_arc.lock().await;
+            match transport_guard.send_frame(&chunk_msg).await {
+                Ok(_) => {
+                    debug!("Dispatched chunk #{} on {}", chunk_id, kind);
                 }
-
-                // Check in-flight count for this transport
-                let in_flight_for_transport = {
-                    let map = self.in_flight.lock().await;
-                    map.values().filter(|(t, _)| *t == kind).count()
-                };
-
-                if in_flight_for_transport >= self.config.max_in_flight_per_transport {
-                    continue;
-                }
-
-                // Pull next pending chunk from FIFO queue
-                let next_chunk_id = {
-                    let mut queue = self.pending_chunks.lock().await;
-                    queue.pop_front()
-                };
-
-                let chunk_id = match next_chunk_id {
-                    Some(id) => id,
-                    None => break, // No more pending chunks
-                };
-
-                // Track chunk as in-flight
-                {
-                    let mut map = self.in_flight.lock().await;
-                    map.insert(chunk_id, (kind, Instant::now()));
-                }
-
-                // Read chunk payload asynchronously from disk buffer pool (§10.2)
-                let entry = &plan[chunk_id as usize];
-                let payload = match read_chunk_at(&self.file_path, entry.file_offset, entry.payload_length) {
-                    Ok(data) => data,
-                    Err(e) => {
-                        error!("Failed to read chunk #{} from disk: {} -> requeueing", chunk_id, e);
+                Err(e) => {
+                    warn!("Transport {} send failed on chunk #{}: {} -> requeueing", kind, chunk_id, e);
+                    self.metrics.record_retry(kind);
+                    {
                         let mut map = self.in_flight.lock().await;
                         map.remove(&chunk_id);
                         let mut queue = self.pending_chunks.lock().await;
                         queue.push_front(chunk_id);
-                        continue;
                     }
-                };
-
-                let checksum = compute_xxhash64(&payload);
-                let chunk_msg = Message::ChunkData(ChunkDataPayload {
-                    transfer_id: self.transfer_id,
-                    file_id: self.file_id,
-                    chunk_id,
-                    file_offset: entry.file_offset,
-                    payload_length: entry.payload_length,
-                    checksum,
-                    payload: payload.to_vec(),
-                });
-
-                // Send frame over transport
-                match transport_guard.send_frame(&chunk_msg).await {
-                    Ok(_) => {
-                        debug!("Dispatched chunk #{} on {}", chunk_id, kind);
-                        dispatched_any = true;
-                    }
-                    Err(e) => {
-                        warn!("Transport {} send failed on chunk #{}: {} -> requeueing in-flight", kind, chunk_id, e);
-                        self.metrics.record_retry(kind);
-
-                        // Requeue failed chunk
-                        {
-                            let mut map = self.in_flight.lock().await;
-                            map.remove(&chunk_id);
-                            let mut queue = self.pending_chunks.lock().await;
-                            queue.push_front(chunk_id);
-                        }
-
-                        // Requeue all other in-flight chunks on this dropped transport (§10.5)
-                        self.requeue_transport_in_flight(kind).await;
-                    }
+                    self.requeue_transport_in_flight(kind).await;
                 }
-            }
-
-            // Yield / poll ACKs
-            if !dispatched_any {
-                tokio::time::sleep(Duration::from_millis(10)).await;
             }
         }
 
@@ -325,9 +380,27 @@ impl MultipathScheduler {
 
     /// Handles an incoming ACK for a completed chunk.
     pub async fn handle_chunk_ack(&self, ack: &ChunkAckData, kind: TransportKind, chunk_len: u64) {
-        {
+        let sent_time = {
             let mut map = self.in_flight.lock().await;
-            map.remove(&ack.chunk_id);
+            map.remove(&ack.chunk_id).map(|(_, t)| t)
+        };
+
+        let rtt_us = sent_time.map_or(50_000, |t| t.elapsed().as_micros() as u64);
+
+        {
+            let mut list = self.transports.lock().await;
+            if let Some(st) = list.iter_mut().find(|st| st.kind == kind) {
+                if let Some(sample) = st.tracker.record_chunk_ack(
+                    ack.chunk_id,
+                    chunk_len,
+                    rtt_us,
+                    1_000,
+                    ack.receiver_verify_us,
+                ) {
+                    st.model.update_from_tracker_and_sample(&st.tracker, &sample);
+                    st.window.evaluate_and_adjust(&st.tracker, &st.model);
+                }
+            }
         }
 
         let is_new = {
@@ -358,6 +431,13 @@ impl MultipathScheduler {
         warn!("Chunk NACK #{} received: {} -> requeueing for retry", nack.chunk_id, nack.reason);
         self.metrics.record_retry(kind);
 
+        {
+            let mut list = self.transports.lock().await;
+            if let Some(st) = list.iter_mut().find(|st| st.kind == kind) {
+                st.tracker.record_chunk_nack(nack.chunk_id, &nack.reason);
+            }
+        }
+
         if let Some(actor) = &self.manifest_actor {
             let transport_type = match kind {
                 TransportKind::Usb => TransportType::Usb,
@@ -379,6 +459,13 @@ impl MultipathScheduler {
 
     /// Requeues all in-flight chunks belonging to a disconnected transport back to the shared pending queue (§10.5).
     pub async fn requeue_transport_in_flight(&self, kind: TransportKind) {
+        {
+            let mut list = self.transports.lock().await;
+            if let Some(st) = list.iter_mut().find(|st| st.kind == kind) {
+                st.tracker.record_disconnect("Transport disconnected");
+            }
+        }
+
         let mut map = self.in_flight.lock().await;
         let mut queue = self.pending_chunks.lock().await;
 

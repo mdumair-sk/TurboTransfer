@@ -153,14 +153,92 @@ async fn run_cold_resume_test() {
 
     sender_task.await.unwrap().expect("Sender session failed");
     let output_path = receiver_task.await.unwrap().expect("Receiver session failed");
-
     println!("============================================================");
     println!(" PHASE 4: Validate byte-for-byte CRC32c match on resumed file");
     println!("============================================================");
     let final_bytes = std::fs::read(&output_path).unwrap();
     let final_crc = compute_file_crc32c(&output_path).unwrap();
-
     assert_eq!(source_bytes, final_bytes);
     assert_eq!(expected_crc, final_crc);
     println!("  -> SUCCESS: Resumed file is byte-for-byte identical! CRC32c: 0x{:08X}", final_crc);
+}
+
+#[tokio::test]
+async fn test_api_resume_transfer_multipath() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let src_path = temp_dir.path().join("api_resume_test.bin");
+    let dest_dir = temp_dir.path().join("dest");
+    let data_dir = temp_dir.path().join("data");
+    std::fs::create_dir_all(&dest_dir).unwrap();
+    std::fs::create_dir_all(&data_dir).unwrap();
+
+    turbotransfer_core::transfer::api::set_custom_data_dir(data_dir.clone());
+
+    let file_size = 24 * 1024 * 1024; // 24 MB (12 chunks of 2 MB)
+    let mut source_bytes = Vec::with_capacity(file_size);
+    for i in 0..file_size {
+        source_bytes.push(((i * 11 + 3) % 256) as u8);
+    }
+    std::fs::write(&src_path, &source_bytes).unwrap();
+    let expected_crc = compute_file_crc32c(&src_path).unwrap();
+
+    // Start receiver
+    let recv_addr = "127.0.0.1:19876".to_string();
+    let _receiver_join = turbotransfer_core::transfer::api::enter_receive_mode(
+        Some(recv_addr.clone()),
+        dest_dir.clone(),
+    )
+    .await
+    .expect("enter_receive_mode failed");
+
+    // Start transfer from API
+    let handle = turbotransfer_core::transfer::api::start_transfer(
+        src_path.clone(),
+        Some("api_resume_test.bin".into()),
+        None,
+        turbotransfer_core::transfer::api::TransportPreference::Automatic,
+        Some(recv_addr.clone()),
+    )
+    .await
+    .expect("start_transfer failed");
+
+    let transfer_id = handle.transfer_id;
+
+    // Pause mid-transfer
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    turbotransfer_core::transfer::api::pause_transfer(transfer_id);
+
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    let status = turbotransfer_core::transfer::api::transfer_control_status(transfer_id);
+    assert_eq!(status, Some(turbotransfer_core::manifest::TransferStatus::Paused));
+
+    // Call resume_transfer
+    let resume_handle = turbotransfer_core::transfer::api::resume_transfer(
+        Some(transfer_id),
+        turbotransfer_core::transfer::api::TransportPreference::Automatic,
+        Some(recv_addr.clone()),
+    )
+    .await
+    .expect("resume_transfer failed");
+
+    assert_eq!(resume_handle.transfer_id, transfer_id);
+
+    // Wait for completion
+    let start_wait = std::time::Instant::now();
+    loop {
+        if start_wait.elapsed().as_secs() > 10 {
+            panic!("Resumed transfer did not complete within 10s");
+        }
+        if let Some(p) = turbotransfer_core::transfer::api::get_progress(transfer_id) {
+            if p.status == turbotransfer_core::manifest::TransferStatus::Completed {
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    let output_file = dest_dir.join("api_resume_test.bin");
+    assert!(output_file.exists(), "Output file must exist after transfer completion");
+    let out_crc = compute_file_crc32c(&output_file).unwrap();
+    assert_eq!(expected_crc, out_crc);
 }

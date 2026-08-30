@@ -181,3 +181,51 @@ async fn test_actor_restart_simulation() {
     fresh_handle.cancel().await;
     fresh_join.await.unwrap();
 }
+
+#[test]
+fn test_pause_and_cancel_from_non_tokio_thread() {
+    let temp_dir = tempdir().unwrap();
+    let meta_path = temp_dir.path().join("thread_test.meta.json");
+    let transfer_id = Uuid::new_v4();
+
+    let initial_meta = TransferMeta::new(
+        transfer_id,
+        Uuid::new_v4(),
+        "thread_test.bin".into(),
+        1000,
+        100,
+        10,
+        TransferRole::Sender,
+        Uuid::new_v4(),
+    );
+
+    let (actor_handle, _join_handle) = MetaActor::spawn(meta_path, initial_meta, 32);
+
+    turbotransfer_core::transfer::api::register_active_transfer(
+        transfer_id,
+        "thread_test.bin".into(),
+        1000,
+        TransferRole::Sender,
+        10,
+        "TestTransport".into(),
+    );
+    turbotransfer_core::transfer::api::set_transfer_actor_handle(transfer_id, actor_handle);
+
+    // Call pause_transfer from a plain OS thread outside any Tokio context
+    let pause_thread = std::thread::spawn(move || {
+        turbotransfer_core::transfer::api::pause_transfer(transfer_id);
+    });
+    pause_thread.join().expect("pause_transfer must not panic on plain OS thread");
+
+    let status = turbotransfer_core::transfer::api::transfer_control_status(transfer_id);
+    assert_eq!(status, Some(TransferStatus::Paused));
+
+    // Call cancel_transfer from another plain OS thread
+    let cancel_thread = std::thread::spawn(move || {
+        turbotransfer_core::transfer::api::cancel_transfer(transfer_id);
+    });
+    cancel_thread.join().expect("cancel_transfer must not panic on plain OS thread");
+
+    let status_after_cancel = turbotransfer_core::transfer::api::transfer_control_status(transfer_id);
+    assert_eq!(status_after_cancel, Some(TransferStatus::Cancelled));
+}

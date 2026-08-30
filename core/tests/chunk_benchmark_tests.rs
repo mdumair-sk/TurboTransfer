@@ -51,7 +51,7 @@ async fn test_chunk_size_memory_and_allocation_bench() {
 #[test]
 fn test_multichannel_config_bench() {
     struct ChannelSim {
-        name: String,
+        _name: String,
         capacity_mbps: f64,
         tracker: ChannelTracker,
         model: ChannelPerformanceModel,
@@ -75,7 +75,7 @@ fn test_multichannel_config_bench() {
         let mut channels: Vec<ChannelSim> = channels_def
             .iter()
             .map(|&(name, cap)| ChannelSim {
-                name: name.to_string(),
+                _name: name.to_string(),
                 capacity_mbps: cap,
                 tracker: ChannelTracker::new(name.to_string()),
                 model: ChannelPerformanceModel::new(name.to_string(), cap),
@@ -111,7 +111,7 @@ fn test_multichannel_config_bench() {
                 1_000,
                 Some(1_200),
             ) {
-                ch.model.update_from_sample(&sample);
+                ch.model.update_from_tracker_and_sample(&ch.tracker, &sample);
             }
 
             sim_time_ms += service_sec * 1000.0 / (channels.len() as f64);
