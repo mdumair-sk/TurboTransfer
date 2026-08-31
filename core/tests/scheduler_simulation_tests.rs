@@ -205,9 +205,9 @@ fn test_aimd_window_controller() {
 
     // Simulate multi-signal congestion (high socket duration + RTT inflation + no goodput gain)
     let mut win_after_congestion = window.current_window;
-    for i in 10..15 {
+    for i in 10..20 {
         tracker.record_chunk_sent(i, chunk_size);
-        simulate_chunk_ack(&mut tracker, &mut model, i, chunk_size, 1_200_000, 80_000, Some(1_000));
+        simulate_chunk_ack(&mut tracker, &mut model, i, chunk_size, 1_200_000, 80_000, Some(1_200_000));
         win_after_congestion = window.evaluate_and_adjust(&tracker, &model);
     }
 

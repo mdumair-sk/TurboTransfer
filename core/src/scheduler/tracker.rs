@@ -304,8 +304,9 @@ impl ChannelTracker {
             let newest = valid_samples.last().unwrap().timestamp;
             let dt = newest.duration_since(oldest).as_secs_f64();
             if dt >= 0.005 {
-                let sum_bytes: u64 = valid_samples.iter().map(|s| s.bytes).sum();
-                return ((sum_bytes as f64) / (1024.0 * 1024.0)) / dt;
+                let sum_bytes: u64 = valid_samples.iter().skip(1).map(|s| s.bytes).sum();
+                let raw_mbps = ((sum_bytes as f64) / (1024.0 * 1024.0)) / dt;
+                return raw_mbps.min(300.0);
             }
         }
 
