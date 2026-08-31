@@ -81,6 +81,7 @@ fn handle_ack_frame(
     completed_chunks_count: &mut u32,
     telemetry: Option<&TransferTelemetry>,
     channel_name: &str,
+    actor_handle: Option<&crate::manifest::actor::MetaActorHandle>,
 ) -> Result<(), TransferSessionError> {
     match frame {
         Message::ChunkAck(ack) => {
@@ -93,7 +94,7 @@ fn handle_ack_frame(
                 }
             }
             if completed_set.insert(ack.chunk_id) {
-                if let Some(actor) = crate::transfer::api::get_transfer_actor_handle(transfer_id) {
+                if let Some(actor) = actor_handle {
                     let t_type = if is_usb { crate::manifest::TransportType::Usb } else { crate::manifest::TransportType::WifiDirect };
                     actor.try_send_chunk_completed(ack.chunk_id, t_type, bytes_len);
                 }
@@ -120,7 +121,7 @@ fn handle_ack_frame(
                     }
                 }
                 if completed_set.insert(cid) {
-                    if let Some(actor) = crate::transfer::api::get_transfer_actor_handle(transfer_id) {
+                    if let Some(actor) = actor_handle {
                         let t_type = if is_usb { crate::manifest::TransportType::Usb } else { crate::manifest::TransportType::WifiDirect };
                         actor.try_send_chunk_completed(cid, t_type, bytes_len);
                     }
@@ -424,6 +425,8 @@ where
             Ok(())
         });
 
+        let actor_handle = crate::transfer::api::get_transfer_actor_handle(transfer_id);
+
         while completed_set.len() < total_chunks_needed {
             match transfer_control_status(transfer_id) {
                 Some(TransferStatus::Paused) => {
@@ -458,6 +461,7 @@ where
                                     &mut completed_chunks_count,
                                     Some(&telemetry),
                                     ch_name,
+                                    actor_handle.as_ref(),
                                 )?;
                             }
                             Ok(None) => {
@@ -522,6 +526,7 @@ where
                     &mut completed_chunks_count,
                     Some(&telemetry),
                     ch_name,
+                    actor_handle.as_ref(),
                 )?;
             }
         }
@@ -644,6 +649,7 @@ async fn handle_multipath_ack_frame(
     telemetry: Option<&std::sync::Arc<TransferTelemetry>>,
     channel_name: &str,
     last_socket_duration_us: u64,
+    actor_handle: Option<&crate::manifest::actor::MetaActorHandle>,
 ) -> Result<(), TransferSessionError> {
     match frame {
         Message::ChunkAck(ack) => {
@@ -668,7 +674,7 @@ async fn handle_multipath_ack_frame(
 
             let is_new = completed.lock().insert(ack.chunk_id);
             if is_new {
-                if let Some(actor) = crate::transfer::api::get_transfer_actor_handle(transfer_id) {
+                if let Some(actor) = actor_handle {
                     let t_type = if is_usb { crate::manifest::TransportType::Usb } else { crate::manifest::TransportType::WifiDirect };
                     actor.try_send_chunk_completed(ack.chunk_id, t_type, bytes_len);
                 }
@@ -703,7 +709,7 @@ async fn handle_multipath_ack_frame(
 
                 let is_new = completed.lock().insert(cid);
                 if is_new {
-                    if let Some(actor) = crate::transfer::api::get_transfer_actor_handle(transfer_id) {
+                    if let Some(actor) = actor_handle {
                         let t_type = if is_usb { crate::manifest::TransportType::Usb } else { crate::manifest::TransportType::WifiDirect };
                         actor.try_send_chunk_completed(cid, t_type, bytes_len);
                     }
@@ -1080,6 +1086,7 @@ pub async fn send_file_session_multipath(
             let mut window = if is_usb { WindowController::for_usb() } else { WindowController::for_wifi() };
             let mut worker_in_flight_times = std::collections::HashMap::new();
             let mut last_socket_send_us: u64 = 1_000;
+            let actor_handle = crate::transfer::api::get_transfer_actor_handle(transfer_id);
 
             loop {
                 if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
@@ -1139,6 +1146,7 @@ pub async fn send_file_session_multipath(
                                     telemetry_worker.as_ref(),
                                     &channel_name,
                                     last_socket_send_us,
+                                    actor_handle.as_ref(),
                                 ).await?;
                                 if completed_count.load(std::sync::atomic::Ordering::Relaxed) >= total_chunks {
                                     cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1471,9 +1479,9 @@ where
         drop(writer_file);
         Ok(())
     });
-
     let mut bytes_recv_total = 0u64;
     let mut completed_chunks_count = 0u32;
+    let actor_handle = crate::transfer::api::get_transfer_actor_handle(offer.transfer_id);
 
     // 6. Data Plane Receive Loop
     loop {
@@ -1500,13 +1508,13 @@ where
                     continue;
                 }
 
-                // Idempotent write check (§5.1)
-                if tracker.is_chunk_completed(
+                let is_already_done = tracker.is_chunk_completed(
                     chunk_data.transfer_id,
                     chunk_data.file_id,
                     chunk_data.chunk_id,
                     chunk_data.checksum,
-                ) {
+                );
+                if is_already_done {
                     if !chunk_crcs.contains_key(&chunk_data.chunk_id) {
                         let chunk_crc = crate::checksum::compute_crc32c(&chunk_data.payload);
                         chunk_crcs.insert(chunk_data.chunk_id, (chunk_crc, chunk_data.payload.len()));
@@ -1540,7 +1548,7 @@ where
                 );
                 let is_usb = transport.kind() == crate::transport::TransportKind::Usb;
                 crate::transfer::api::record_channel_bytes(chunk_data.transfer_id, is_usb, chunk_len);
-                if let Some(actor) = crate::transfer::api::get_transfer_actor_handle(chunk_data.transfer_id) {
+                if let Some(actor) = actor_handle.as_ref() {
                     let t_type = if is_usb { crate::manifest::TransportType::Usb } else { crate::manifest::TransportType::WifiDirect };
                     actor.try_send_chunk_completed(chunk_data.chunk_id, t_type, chunk_len);
                 }

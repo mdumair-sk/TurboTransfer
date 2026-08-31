@@ -1094,6 +1094,7 @@ async fn handle_incoming_receive_transport(
             new_session
         }
     };
+    let actor_handle = get_transfer_actor_handle(offer.transfer_id);
 
     // 4. Send TransferAccept
     let resume_from = session.tracker.lock().get_completed_ranges();
@@ -1103,31 +1104,30 @@ async fn handle_incoming_receive_transport(
     });
     transport.send_frame(&accept).await?;
 
-    // 5. Receive chunks
+    // 5. Data Plane Receive Loop
     loop {
-        let frame = match transport.receive_frame().await? {
-            Some(f) => f,
-            None => break,
+        let ch_name = if is_usb { "USB" } else { "Wi-Fi" };
+        let frame_res = transport.receive_frame().await;
+        let frame = match frame_res {
+            Ok(Some(f)) => f,
+            Ok(None) => {
+                session.telemetry.record_channel_disconnect(ch_name, "Peer disconnected / EOF");
+                break;
+            }
+            Err(e) => {
+                session.telemetry.record_channel_disconnect(ch_name, &e.to_string());
+                return Err(TransferSessionError::Transport(e));
+            }
         };
 
         match frame {
             Message::ChunkData(chunk_data) => {
-                let ch_name = if is_usb { "USB" } else { "Wi-Fi" };
                 let t_v0 = std::time::Instant::now();
                 let computed_checksum = compute_xxhash64(&chunk_data.payload);
                 let verify_us = t_v0.elapsed().as_micros() as u64;
 
                 if computed_checksum != chunk_data.checksum {
-                    session.telemetry.record_event(
-                        TransferStage::Checksum,
-                        EventLevel::Warn,
-                        ch_name,
-                        Some(chunk_data.chunk_id),
-                        Some(verify_us),
-                        Some(chunk_data.payload.len() as u64),
-                        format!("Checksum mismatch on chunk #{}", chunk_data.chunk_id),
-                        None,
-                    );
+                    session.telemetry.record_chunk_nack(ch_name, chunk_data.chunk_id, "xxHash64 payload mismatch");
                     let nack = Message::ChunkNack(ChunkNackData {
                         transfer_id: chunk_data.transfer_id,
                         chunk_id: chunk_data.chunk_id,
@@ -1145,7 +1145,7 @@ async fn handle_incoming_receive_transport(
                     verify_us,
                 );
 
-                let is_duplicate = {
+                let is_already_done = {
                     let tracker = session.tracker.lock();
                     tracker.is_chunk_completed(
                         chunk_data.transfer_id,
@@ -1155,9 +1155,8 @@ async fn handle_incoming_receive_transport(
                     )
                 };
 
-                if is_duplicate {
+                if is_already_done {
                     session.telemetry.record_duplicate_chunk(chunk_data.chunk_id);
-                    // Fix B2: Ensure chunk_crcs is populated even on duplicates so total_chunks match at Complete
                     {
                         let mut crc_map = session.chunk_crcs.lock();
                         if !crc_map.contains_key(&chunk_data.chunk_id) {
@@ -1196,7 +1195,7 @@ async fn handle_incoming_receive_transport(
                 if !session.is_sender_in_same_process {
                     update_transfer_progress(chunk_data.transfer_id, total_b, total_c);
                     record_channel_bytes(chunk_data.transfer_id, is_usb, chunk_data.payload_length as u64);
-                    if let Some(actor) = get_transfer_actor_handle(chunk_data.transfer_id) {
+                    if let Some(actor) = actor_handle.as_ref() {
                         let t_type = if is_usb { TransportType::Usb } else { TransportType::WifiDirect };
                         actor.try_send_chunk_completed(chunk_data.chunk_id, t_type, chunk_data.payload_length as u64);
                     }

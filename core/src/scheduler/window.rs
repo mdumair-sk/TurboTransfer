@@ -9,9 +9,9 @@ pub const USB_MIN_WINDOW: usize = 8;
 pub const USB_MAX_WINDOW: usize = 32;
 pub const USB_INITIAL_WINDOW: usize = 16;
 
-pub const WIFI_MIN_WINDOW: usize = 6;
-pub const WIFI_MAX_WINDOW: usize = 24;
-pub const WIFI_INITIAL_WINDOW: usize = 12;
+pub const WIFI_MIN_WINDOW: usize = 8;
+pub const WIFI_MAX_WINDOW: usize = 32;
+pub const WIFI_INITIAL_WINDOW: usize = 16;
 
 /// Configuration and controller for channel concurrency window sizing.
 #[derive(Debug, Clone)]
@@ -23,6 +23,7 @@ pub struct WindowController {
     pub window_before_probe: usize,
     pub goodput_at_last_adjust: f64,
     pub rtt_at_last_adjust: f64,
+    pub socket_backpressure_threshold_us: f64,
 
     chunks_since_adjust: usize,
     last_adjust_time: Instant,
@@ -32,6 +33,15 @@ pub struct WindowController {
 
 impl WindowController {
     pub fn new(min_window: usize, max_window: usize, initial_window: usize) -> Self {
+        Self::with_backpressure_threshold(min_window, max_window, initial_window, 50_000.0)
+    }
+
+    pub fn with_backpressure_threshold(
+        min_window: usize,
+        max_window: usize,
+        initial_window: usize,
+        socket_backpressure_threshold_us: f64,
+    ) -> Self {
         let min_win = min_window.max(1);
         let max_win = max_window.max(min_win);
         let init_win = initial_window.clamp(min_win, max_win);
@@ -42,6 +52,7 @@ impl WindowController {
             window_before_probe: init_win,
             goodput_at_last_adjust: 0.0,
             rtt_at_last_adjust: 0.0,
+            socket_backpressure_threshold_us,
             chunks_since_adjust: 0,
             last_adjust_time: Instant::now(),
             increase_cooldown_chunks: 2,
@@ -51,12 +62,12 @@ impl WindowController {
 
     /// Presets tailored for USB (high bandwidth, low latency).
     pub fn for_usb() -> Self {
-        Self::new(USB_MIN_WINDOW, USB_MAX_WINDOW, USB_INITIAL_WINDOW)
+        Self::with_backpressure_threshold(USB_MIN_WINDOW, USB_MAX_WINDOW, USB_INITIAL_WINDOW, 50_000.0)
     }
 
     /// Presets tailored for Wi-Fi Direct / TCP streams (higher RTT, larger in-flight needed for pipeline fill).
     pub fn for_wifi() -> Self {
-        Self::new(WIFI_MIN_WINDOW, WIFI_MAX_WINDOW, WIFI_INITIAL_WINDOW)
+        Self::with_backpressure_threshold(WIFI_MIN_WINDOW, WIFI_MAX_WINDOW, WIFI_INITIAL_WINDOW, 400_000.0)
     }
 
     /// Evaluates recent channel performance and updates the allowable in-flight window.
@@ -83,7 +94,7 @@ impl WindowController {
         };
 
         // 1. Multiplicative Decrease on Multi-Signal Corroborated Congestion
-        let is_socket_backpressure = model.socket_duration_ewma_us > 50_000.0
+        let is_socket_backpressure = model.socket_duration_ewma_us > self.socket_backpressure_threshold_us
             && tracker.socket_blocking_ratio() > 0.20;
         let is_severe_rtt_inflation = cur_rtt > 600_000.0 && self.rtt_at_last_adjust > 0.0 && rtt_gain_pct > 30.0;
         let is_congestion = (is_socket_backpressure || is_severe_rtt_inflation) && goodput_gain_pct <= 0.0;
@@ -122,7 +133,7 @@ impl WindowController {
             && self.current_window < self.max_window
             && (goodput_gain_pct >= -5.0 || self.goodput_at_last_adjust == 0.0)
             && tracker.socket_blocking_ratio() < 0.10
-            && model.socket_duration_ewma_us < 35_000.0
+            && model.socket_duration_ewma_us < self.socket_backpressure_threshold_us * 0.85
             && rtt_gain_pct < 40.0;
 
         if is_healthy {
