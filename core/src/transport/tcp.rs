@@ -122,9 +122,13 @@ impl Transport for TcpTransport {
             )));
         }
 
-        // Flush control messages immediately to guarantee low handshake/ACK latency,
-        // but stream continuous ChunkData without synchronous flush to maximize TCP throughput.
-        if !matches!(msg, Message::ChunkData(_)) {
+        // Flush handshake and session termination control messages immediately,
+        // but stream continuous ChunkData, ChunkAck, and BatchChunkAck without synchronous flush
+        // since TCP_NODELAY already transmits frames immediately at the OS level.
+        if !matches!(
+            msg,
+            Message::ChunkData(_) | Message::ChunkAck(_) | Message::BatchChunkAck(_)
+        ) {
             if let Err(e) = self.writer.flush().await {
                 self.status = TransportStatus::Disconnected;
                 return Err(TransportError::Disconnected(format!(

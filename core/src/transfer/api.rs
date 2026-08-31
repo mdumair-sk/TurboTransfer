@@ -346,7 +346,7 @@ pub fn update_transfer_transport_name(transfer_id: Uuid, name: String) {
     }
 }
 
-pub const DEFAULT_WIFI_PARALLEL_STREAMS: usize = 4;
+pub const DEFAULT_WIFI_PARALLEL_STREAMS: usize = 3;
 
 fn get_windows_hotspot_probe_ips() -> Vec<String> {
     let mut ips = Vec::new();

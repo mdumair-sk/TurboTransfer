@@ -938,7 +938,7 @@ pub async fn send_file_session_multipath(
         return Ok(());
     }
 
-    let (prepared_tx, prepared_rx) = async_channel::bounded::<PreparedChunk>(64);
+    let (prepared_tx, prepared_rx) = async_channel::bounded::<PreparedChunk>(128);
     let (retry_tx, retry_rx) = std::sync::mpsc::channel::<crate::chunk::ChunkPlanEntry>();
     let (recycle_tx, recycle_rx) = std::sync::mpsc::channel::<Vec<u8>>();
     let is_cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
