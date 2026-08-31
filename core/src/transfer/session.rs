@@ -8,7 +8,7 @@ use super::api::{
     default_data_dir, register_active_transfer, set_transfer_status, transfer_control_status,
     update_transfer_progress,
 };
-use super::tracker::ChunkTracker;
+use super::tracker::{ChunkTracker, InMemoryChunkTracker};
 use crate::checksum::{compute_file_crc32c, compute_xxhash64};
 use crate::chunk::{calculate_chunk_plan, read_chunk_at};
 use crate::manifest::{generate_manifest_with_name, TransferRole, TransferStatus};
@@ -93,6 +93,10 @@ fn handle_ack_frame(
                 }
             }
             if completed_set.insert(ack.chunk_id) {
+                if let Some(actor) = crate::transfer::api::get_transfer_actor_handle(transfer_id) {
+                    let t_type = if is_usb { crate::manifest::TransportType::Usb } else { crate::manifest::TransportType::WifiDirect };
+                    actor.try_send_chunk_completed(ack.chunk_id, t_type, bytes_len);
+                }
                 if let Some(entry) = plan_map.get(&ack.chunk_id) {
                     *bytes_sent_total += entry.payload_length as u64;
                     *completed_chunks_count += 1;
@@ -116,6 +120,10 @@ fn handle_ack_frame(
                     }
                 }
                 if completed_set.insert(cid) {
+                    if let Some(actor) = crate::transfer::api::get_transfer_actor_handle(transfer_id) {
+                        let t_type = if is_usb { crate::manifest::TransportType::Usb } else { crate::manifest::TransportType::WifiDirect };
+                        actor.try_send_chunk_completed(cid, t_type, bytes_len);
+                    }
                     if let Some(entry) = plan_map.get(&cid) {
                         *bytes_sent_total += entry.payload_length as u64;
                         *completed_chunks_count += 1;
@@ -494,11 +502,13 @@ where
                     }
                 }
             } else {
-                // Pipeline full -> await ACK from receiver to free slot
-                let frame = transport.receive_frame().await?.ok_or_else(|| {
-                    telemetry.record_channel_disconnect(ch_name, "EOF while waiting for ChunkAck with full pipeline");
-                    TransferSessionError::UnexpectedMessage("EOF while waiting for ChunkAck".into())
-                })?;
+                // Pipeline full -> await ACK from receiver to free slot with 15s timeout
+                let frame = tokio::time::timeout(tokio::time::Duration::from_secs(15), transport.receive_frame()).await
+                    .map_err(|_| TransferSessionError::Transport(TransportError::Disconnected("Timeout (15s) awaiting ChunkAck from receiver".into())))??
+                    .ok_or_else(|| {
+                        telemetry.record_channel_disconnect(ch_name, "EOF while waiting for ChunkAck with full pipeline");
+                        TransferSessionError::UnexpectedMessage("EOF while waiting for ChunkAck".into())
+                    })?;
                 handle_ack_frame(
                     frame,
                     is_usb,
@@ -520,7 +530,10 @@ where
         drop(retry_tx);
         drop(chunk_rx);
         drop(recycle_tx);
-        let _ = reader_handle.await;
+        if let Ok(Err(e)) = reader_handle.await {
+            telemetry.mark_failed(&format!("Source file read error: {}", e));
+            return Err(TransferSessionError::Io(e));
+        }
     }
 
     // 6. Complete transfer
@@ -635,29 +648,30 @@ async fn handle_multipath_ack_frame(
     match frame {
         Message::ChunkAck(ack) => {
             let bytes_len = plan_map.get(&ack.chunk_id).map_or(0, |e| e.payload_length as u64);
-            let rtt_us = if let Some(t_disp) = worker_in_flight_times.remove(&ack.chunk_id) {
-                let rtt_ms = t_disp.elapsed().as_secs_f64() * 1000.0;
+            if let Some(t_disp) = worker_in_flight_times.remove(&ack.chunk_id) {
+                let rtt_us = t_disp.elapsed().as_micros() as u64;
+                let rtt_ms = rtt_us as f64 / 1000.0;
                 if let Some(tel) = telemetry {
                     tel.record_chunk_ack(channel_name, ack.chunk_id, rtt_ms, bytes_len);
                 }
-                t_disp.elapsed().as_micros() as u64
-            } else {
-                50_000
-            };
-
-            if let Some(sample) = tracker.record_chunk_ack(
-                ack.chunk_id,
-                bytes_len,
-                rtt_us,
-                last_socket_duration_us,
-                ack.receiver_verify_us,
-            ) {
-                model.update_from_tracker_and_sample(tracker, &sample);
-                window.evaluate_and_adjust(tracker, model);
+                if let Some(sample) = tracker.record_chunk_ack(
+                    ack.chunk_id,
+                    bytes_len,
+                    rtt_us,
+                    last_socket_duration_us,
+                    ack.receiver_verify_us,
+                ) {
+                    model.update_from_tracker_and_sample(tracker, &sample);
+                    window.evaluate_and_adjust(tracker, model);
+                }
             }
 
             let is_new = completed.lock().insert(ack.chunk_id);
             if is_new {
+                if let Some(actor) = crate::transfer::api::get_transfer_actor_handle(transfer_id) {
+                    let t_type = if is_usb { crate::manifest::TransportType::Usb } else { crate::manifest::TransportType::WifiDirect };
+                    actor.try_send_chunk_completed(ack.chunk_id, t_type, bytes_len);
+                }
                 completed_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if let Some(entry) = plan_map.get(&ack.chunk_id) {
                     let total_b = bytes_sent.fetch_add(entry.payload_length as u64, std::sync::atomic::Ordering::Relaxed) + entry.payload_length as u64;
@@ -670,28 +684,29 @@ async fn handle_multipath_ack_frame(
         Message::BatchChunkAck(batch) => {
             for cid in batch.chunk_ids {
                 let bytes_len = plan_map.get(&cid).map_or(0, |e| e.payload_length as u64);
-                let rtt_us = if let Some(t_disp) = worker_in_flight_times.remove(&cid) {
-                    let rtt_ms = t_disp.elapsed().as_secs_f64() * 1000.0;
+                if let Some(t_disp) = worker_in_flight_times.remove(&cid) {
+                    let rtt_us = t_disp.elapsed().as_micros() as u64;
+                    let rtt_ms = rtt_us as f64 / 1000.0;
                     if let Some(tel) = telemetry {
                         tel.record_chunk_ack(channel_name, cid, rtt_ms, bytes_len);
                     }
-                    t_disp.elapsed().as_micros() as u64
-                } else {
-                    50_000
-                };
-
-                if let Some(sample) = tracker.record_chunk_ack(
-                    cid,
-                    bytes_len,
-                    rtt_us,
-                    last_socket_duration_us,
-                    None,
-                ) {
-                    model.update_from_tracker_and_sample(tracker, &sample);
+                    if let Some(sample) = tracker.record_chunk_ack(
+                        cid,
+                        bytes_len,
+                        rtt_us,
+                        last_socket_duration_us,
+                        None,
+                    ) {
+                        model.update_from_tracker_and_sample(tracker, &sample);
+                    }
                 }
 
                 let is_new = completed.lock().insert(cid);
                 if is_new {
+                    if let Some(actor) = crate::transfer::api::get_transfer_actor_handle(transfer_id) {
+                        let t_type = if is_usb { crate::manifest::TransportType::Usb } else { crate::manifest::TransportType::WifiDirect };
+                        actor.try_send_chunk_completed(cid, t_type, bytes_len);
+                    }
                     completed_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if let Some(entry) = plan_map.get(&cid) {
                         let total_b = bytes_sent.fetch_add(entry.payload_length as u64, std::sync::atomic::Ordering::Relaxed) + entry.payload_length as u64;
@@ -864,7 +879,13 @@ pub async fn send_file_session_multipath(
         ));
     }
 
-    // 2. Data Plane: Shared state across all transports
+    // 2. Data Plane: Shared state across all transports using InMemoryChunkTracker
+    let chunk_tracker = InMemoryChunkTracker::from_ranges(transfer_id, manifest.file_id, &resume_ranges_combined);
+    let missing_chunks: std::collections::HashSet<u32> = chunk_tracker
+        .get_missing_chunks(manifest.file_size, manifest.chunk_size)
+        .into_iter()
+        .collect();
+
     let mut initial_chunks_to_send = std::collections::VecDeque::new();
     let mut bytes_sent_total_init = 0u64;
     let mut completed_chunks_count_init = 0u32;
@@ -872,15 +893,12 @@ pub async fn send_file_session_multipath(
 
     for entry in &plan {
         let cid = entry.chunk_id;
-        let skip = resume_ranges_combined
-            .iter()
-            .any(|&(start, end)| cid >= start && cid <= end);
-        if skip {
+        if missing_chunks.contains(&cid) {
+            initial_chunks_to_send.push_back(entry.clone());
+        } else {
             bytes_sent_total_init += entry.payload_length as u64;
             completed_chunks_count_init += 1;
             completed_set_init.insert(cid);
-        } else {
-            initial_chunks_to_send.push_back(entry.clone());
         }
     }
 
@@ -914,7 +932,7 @@ pub async fn send_file_session_multipath(
         return Ok(());
     }
 
-    let (prepared_tx, prepared_rx) = async_channel::bounded::<PreparedChunk>(48);
+    let (prepared_tx, prepared_rx) = async_channel::bounded::<PreparedChunk>(64);
     let (retry_tx, retry_rx) = std::sync::mpsc::channel::<crate::chunk::ChunkPlanEntry>();
     let (recycle_tx, recycle_rx) = std::sync::mpsc::channel::<Vec<u8>>();
     let is_cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1218,7 +1236,12 @@ pub async fn send_file_session_multipath(
     prepared_rx.close();
     drop(shared_retry_tx);
     drop(shared_recycle_tx);
-    let _ = reader_handle.await;
+    if let Ok(Err(e)) = reader_handle.await {
+        telemetry.mark_failed(&format!("Source file read error: {}", e));
+        let data_dir = default_data_dir();
+        export_and_clean_telemetry(transfer_id, &data_dir);
+        return Err(TransferSessionError::Io(e));
+    }
 
     let final_done = {
         let c = shared_completed.lock();
@@ -1517,6 +1540,10 @@ where
                 );
                 let is_usb = transport.kind() == crate::transport::TransportKind::Usb;
                 crate::transfer::api::record_channel_bytes(chunk_data.transfer_id, is_usb, chunk_len);
+                if let Some(actor) = crate::transfer::api::get_transfer_actor_handle(chunk_data.transfer_id) {
+                    let t_type = if is_usb { crate::manifest::TransportType::Usb } else { crate::manifest::TransportType::WifiDirect };
+                    actor.try_send_chunk_completed(chunk_data.chunk_id, t_type, chunk_len);
+                }
 
                 // Send immediate ChunkAck for 100% universal sender compatibility
                 let ack = Message::ChunkAck(ChunkAckData {

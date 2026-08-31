@@ -745,10 +745,17 @@ impl TransferTelemetry {
         }
         log_content.push_str("\n--- Channels Breakdown ---\n");
         for ch in &report.channels {
-            log_content.push_str(&format!(
-                "  [{}] Chunks: {}, Bytes: {} ({:.2} MB/s), Socket Write: {:.1} us, Avg ACK Latency: {:.1} ms (P95: {:.1} ms), Max In-Flight: {}, NACKs: {}, Disconnects: {}\n",
-                ch.channel_name, ch.chunks_transferred, ch.bytes_transferred, ch.throughput_mbps, ch.avg_socket_write_us, ch.avg_rtt_ms, ch.p95_rtt_ms, ch.max_in_flight, ch.nack_count, ch.disconnect_count
-            ));
+            if self.role == TransferRole::Sender {
+                log_content.push_str(&format!(
+                    "  [{}] Chunks: {}, Bytes: {} ({:.2} MB/s), Socket Write: {:.1} us, Avg ACK Latency: {:.1} ms (P95: {:.1} ms), Max In-Flight: {}, NACKs: {}, Disconnects: {}\n",
+                    ch.channel_name, ch.chunks_transferred, ch.bytes_transferred, ch.throughput_mbps, ch.avg_socket_write_us, ch.avg_rtt_ms, ch.p95_rtt_ms, ch.max_in_flight, ch.nack_count, ch.disconnect_count
+                ));
+            } else {
+                log_content.push_str(&format!(
+                    "  [{}] Chunks: {}, Bytes: {} ({:.2} MB/s), NACKs: {}, Disconnects: {}\n",
+                    ch.channel_name, ch.chunks_transferred, ch.bytes_transferred, ch.throughput_mbps, ch.nack_count, ch.disconnect_count
+                ));
+            }
         }
         log_content.push_str("\n--- Stage Latencies ---\n");
         if self.role == TransferRole::Sender {

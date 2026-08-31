@@ -10,7 +10,7 @@ use log::debug;
 use super::session::{send_file_session_multipath, TransferSessionError};
 use super::tracker::{ChunkTracker, InMemoryChunkTracker};
 use crate::checksum::{compute_file_crc32c, compute_xxhash64};
-use crate::manifest::{MetaActor, MetaActorHandle, TransferMeta, TransferRole, TransferStatus};
+use crate::manifest::{MetaActor, MetaActorHandle, TransferMeta, TransferRole, TransferStatus, TransportType};
 use crate::protocol::{
     ChunkAckData, ChunkNackData, HelloData, Message, TransferAcceptData,
 };
@@ -290,7 +290,45 @@ pub fn set_transfer_actor_handle(transfer_id: Uuid, handle: MetaActorHandle) {
     let mut map = registry.transfers.lock().unwrap();
     if let Some(record) = map.get_mut(&transfer_id) {
         record.actor_handle = Some(handle);
+    } else {
+        let now = std::time::Instant::now();
+        map.insert(
+            transfer_id,
+            ActiveTransferRecord {
+                transfer_id,
+                file_name: "".to_string(),
+                file_size: 0,
+                bytes_transferred: Arc::new(AtomicU64::new(0)),
+                usb_bytes_transferred: Arc::new(AtomicU64::new(0)),
+                wifi_bytes_transferred: Arc::new(AtomicU64::new(0)),
+                completed_chunks: Arc::new(AtomicU32::new(0)),
+                total_chunks: 0,
+                start_time: now,
+                end_time: Mutex::new(None),
+                role: TransferRole::Sender,
+                status: Arc::new(Mutex::new(TransferStatus::InProgress)),
+                transport_name: "".to_string(),
+                last_error: Arc::new(Mutex::new(None)),
+                actor_handle: Some(handle),
+                source_file_path: None,
+                last_sample_time: Mutex::new(now),
+                last_sample_bytes: Mutex::new(0),
+                last_sample_usb_bytes: Mutex::new(0),
+                last_sample_wifi_bytes: Mutex::new(0),
+                rolling_throughput_bps: Mutex::new(0.0),
+                rolling_usb_throughput_bps: Mutex::new(0.0),
+                rolling_wifi_throughput_bps: Mutex::new(0.0),
+                last_smoothed_eta: Mutex::new(None),
+            },
+        );
     }
+}
+
+/// Retrieves the MetaActor handle of an active transfer if registered.
+pub fn get_transfer_actor_handle(transfer_id: Uuid) -> Option<MetaActorHandle> {
+    let registry = get_registry();
+    let map = registry.transfers.lock().unwrap();
+    map.get(&transfer_id).and_then(|record| record.actor_handle.clone())
 }
 
 /// Default loopback TCP address for Milestone 5 / 6 transfers.
@@ -309,6 +347,35 @@ pub fn update_transfer_transport_name(transfer_id: Uuid, name: String) {
 }
 
 pub const DEFAULT_WIFI_PARALLEL_STREAMS: usize = 4;
+
+fn get_windows_hotspot_probe_ips() -> Vec<String> {
+    let mut ips = Vec::new();
+    #[cfg(target_os = "windows")]
+    {
+        for gw in WifiDirectTransport::resolve_windows_all_gateways() {
+            let addr = format!("{}:9876", gw);
+            if !ips.contains(&addr) {
+                ips.push(addr);
+            }
+        }
+    }
+    for static_ip in &[
+        "10.18.163.1:9876",
+        "10.18.163.2:9876",
+        "10.18.163.130:9876",
+        "10.78.112.40:9876",
+        "192.168.43.1:9876",
+        "192.168.43.2:9876",
+        "192.168.137.1:9876",
+        "192.168.1.19:9876",
+    ] {
+        let addr = static_ip.to_string();
+        if !ips.contains(&addr) {
+            ips.push(addr);
+        }
+    }
+    ips
+}
 
 /// Connects all available transport channels according to the preference and network environment.
 pub async fn resolve_and_connect_transports(
@@ -421,17 +488,10 @@ pub async fn resolve_and_connect_transports(
                         transports.push((Box::new(t), true));
                         transport_names.push("USB (ADB Tunnel)".to_string());
                     }
-                }                // 2. Connect Wi-Fi Direct channel with bonded sockets
-                for hotspot_ip in &[
-                    "10.18.163.1:9876",
-                    "10.18.163.2:9876",
-                    "10.18.163.130:9876",
-                    "10.78.112.40:9876",
-                    "192.168.43.1:9876",
-                    "192.168.43.2:9876",
-                    "192.168.137.1:9876",
-                    "192.168.1.19:9876",
-                ] {
+                }
+                // 2. Connect Wi-Fi Direct channel with bonded sockets
+                let probe_ips = get_windows_hotspot_probe_ips();
+                for hotspot_ip in &probe_ips {
                     let mut connected_any = false;
                     for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
                         if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(500), TcpTransport::connect(hotspot_ip)).await {
@@ -558,18 +618,11 @@ pub async fn resolve_and_connect_transports(
                     }
 
                     // If USB is already connected or probe hotspot, connect Wi-Fi with bonded streams
-                    for hotspot_ip in &[
-                        "10.18.163.1:9876",
-                        "10.18.163.2:9876",
-                        "10.18.163.130:9876",
-                        "10.78.112.40:9876",
-                        "192.168.43.1:9876",
-                        "192.168.43.2:9876",
-                        "192.168.137.1:9876",
-                    ] {
+                    let probe_ips = get_windows_hotspot_probe_ips();
+                    for hotspot_ip in &probe_ips {
                         let mut connected_any = false;
                         for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
-                            if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(400), TcpTransport::connect(hotspot_ip)).await {
+                            if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(500), TcpTransport::connect(hotspot_ip)).await {
                                 if let Ok(transport) = t {
                                     transports.push((Box::new(transport), false));
                                     transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
@@ -585,18 +638,27 @@ pub async fn resolve_and_connect_transports(
             }
 
             if transports.is_empty() {
-                // addr may be comma-separated (e.g. "127.0.0.1:9876,10.18.163.1:9876");
-                // try each component individually instead of passing raw to connect
-                let fallback_addrs: Vec<&str> = addr.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
-                for fallback_addr in &fallback_addrs {
+                if let Some(explicit_addr) = address {
+                    let fallback_addrs: Vec<&str> = explicit_addr.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+                    for fallback_addr in &fallback_addrs {
+                        if let Ok(Ok(t)) = tokio::time::timeout(
+                            tokio::time::Duration::from_millis(800),
+                            TcpTransport::connect(fallback_addr),
+                        ).await {
+                            let is_usb = fallback_addr.contains("127.0.0.1") || fallback_addr.contains("localhost");
+                            transports.push((Box::new(t), is_usb));
+                            transport_names.push("TCP Transport".to_string());
+                            break;
+                        }
+                    }
+                } else {
+                    // Fallback to loopback only if running in test environment or loopback server is active
                     if let Ok(Ok(t)) = tokio::time::timeout(
-                        tokio::time::Duration::from_millis(800),
-                        TcpTransport::connect(fallback_addr),
+                        tokio::time::Duration::from_millis(400),
+                        TcpTransport::connect(DEFAULT_LOOPBACK_ADDR),
                     ).await {
-                        let is_usb = fallback_addr.contains("127.0.0.1") || fallback_addr.contains("localhost");
-                        transports.push((Box::new(t), is_usb));
-                        transport_names.push("TCP Transport".to_string());
-                        break;
+                        transports.push((Box::new(t), true));
+                        transport_names.push("Loopback TCP".to_string());
                     }
                 }
             }
@@ -623,8 +685,6 @@ pub async fn start_transfer(
     let sender_id = Uuid::new_v4();
     let _target_device_id = device_id.unwrap_or_else(Uuid::new_v4);
     let transfer_id = Uuid::new_v4();
-    let chunk_size = 2 * 1024 * 1024; // 2 MiB chunks for optimal pipeline flow and wire-speed Wi-Fi throughput
-
     let file_name = custom_file_name.clone().unwrap_or_else(|| {
         let resolved_path = std::fs::read_link(&file_path).unwrap_or_else(|_| file_path.clone());
         resolved_path
@@ -637,6 +697,8 @@ pub async fn start_transfer(
         Ok(m) => m.len(),
         Err(e) => return Err(TransferSessionError::Io(e)),
     };
+    let is_high_speed = transport_pref == TransportPreference::UsbOnly || transport_pref == TransportPreference::Combined;
+    let chunk_size = crate::chunk::select_optimal_chunk_size(file_size, is_high_speed);
     let plan = crate::chunk::calculate_chunk_plan(file_size, chunk_size);
     let total_chunks = plan.len().max(1) as u32;
 
@@ -947,6 +1009,22 @@ async fn handle_incoming_receive_transport(
                 reg_map.get(&offer.transfer_id).map_or(false, |r| r.role == TransferRole::Sender)
             };
 
+            if !is_sender_in_same_process {
+                let meta_path = default_data_dir().join(format!("{}.meta.json", offer.transfer_id));
+                let initial_meta = TransferMeta::new(
+                    offer.transfer_id,
+                    offer.file_id,
+                    offer.file_name.clone(),
+                    offer.file_size,
+                    offer.chunk_size,
+                    offer.total_chunks,
+                    TransferRole::Receiver,
+                    Uuid::nil(),
+                );
+                let (actor_handle, _actor_join) = MetaActor::spawn(meta_path, initial_meta, 100);
+                set_transfer_actor_handle(offer.transfer_id, actor_handle);
+            }
+
             let disk_error = Arc::new(parking_lot::Mutex::new(None));
             let disk_error_clone = disk_error.clone();
 
@@ -1118,6 +1196,10 @@ async fn handle_incoming_receive_transport(
                 if !session.is_sender_in_same_process {
                     update_transfer_progress(chunk_data.transfer_id, total_b, total_c);
                     record_channel_bytes(chunk_data.transfer_id, is_usb, chunk_data.payload_length as u64);
+                    if let Some(actor) = get_transfer_actor_handle(chunk_data.transfer_id) {
+                        let t_type = if is_usb { TransportType::Usb } else { TransportType::WifiDirect };
+                        actor.try_send_chunk_completed(chunk_data.chunk_id, t_type, chunk_data.payload_length as u64);
+                    }
                 }
 
                 if let Some(ref err) = *session.disk_error.lock() {

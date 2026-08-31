@@ -74,16 +74,17 @@ pub fn preallocate_file(file: &File, file_size: u64) -> std::io::Result<()> {
 /// Strips directory components (`/`, `\`), traversal markers (`..`, `.`),
 /// invalid filesystem characters, control characters, and leading/trailing whitespace/dots.
 pub fn sanitize_filename(name: &str) -> String {
-    // 1. Take only the file name component (removes any directory path prefix)
-    let base = Path::new(name)
+    // 1. Take only the file name component (removes any directory path prefix on Windows and POSIX)
+    let normalized = name.replace('\\', "/");
+    let base = Path::new(&normalized)
         .file_name()
         .and_then(|f| f.to_str())
-        .unwrap_or(name);
+        .unwrap_or(&normalized);
 
     // 2. Filter out control characters, nulls, and illegal path separators
     let filtered: String = base
         .chars()
-        .filter(|c| !c.is_control() && *c != '/' && *c != '\\' && *c != '\0')
+        .filter(|c| !c.is_control() && *c != '/' && *c != '\\' && *c != '\0' && *c != ':')
         .collect();
 
     // 3. Trim whitespace and dots which could cause issues on Windows / POSIX

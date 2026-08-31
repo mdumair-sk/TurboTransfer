@@ -138,9 +138,7 @@ impl ChannelTracker {
 
         if let Some(last_ack) = self.last_ack_time {
             let inter_us = now.duration_since(last_ack).as_micros() as u64;
-            if inter_us > 500 {
-                self.last_inter_ack_us = Some(inter_us);
-            }
+            self.last_inter_ack_us = Some(inter_us);
         }
         self.last_ack_time = Some(now);
 
@@ -293,16 +291,7 @@ impl ChannelTracker {
             return 0.0;
         }
 
-        // 1. If inter-ACK interval is available, calculate pipelined goodput
-        if let Some(inter_us) = self.last_inter_ack_us {
-            let dt = (inter_us as f64) / 1_000_000.0;
-            if dt >= 0.0005 {
-                let last_b = self.recent_samples.last().map(|s| s.bytes).unwrap_or(0);
-                return ((last_b as f64) / (1024.0 * 1024.0)) / dt;
-            }
-        }
-
-        // 2. Multi-sample elapsed duration in recent window
+        // 1. Multi-sample elapsed duration in recent window (smoothed across packet bursts)
         let now = Instant::now();
         let valid_samples: Vec<&AckSample> = self
             .recent_samples
@@ -314,17 +303,28 @@ impl ChannelTracker {
             let oldest = valid_samples.first().unwrap().timestamp;
             let newest = valid_samples.last().unwrap().timestamp;
             let dt = newest.duration_since(oldest).as_secs_f64();
-            if dt >= 0.05 {
+            if dt >= 0.005 {
                 let sum_bytes: u64 = valid_samples.iter().map(|s| s.bytes).sum();
                 return ((sum_bytes as f64) / (1024.0 * 1024.0)) / dt;
+            }
+        }
+
+        // 2. If inter-ACK interval is available, calculate pipelined goodput with 500us safe floor
+        if let Some(inter_us) = self.last_inter_ack_us {
+            let dt = (inter_us as f64) / 1_000_000.0;
+            if dt >= 0.0005 {
+                let last_b = self.recent_samples.last().map(|s| s.bytes).unwrap_or(0);
+                let raw_mbps = ((last_b as f64) / (1024.0 * 1024.0)) / dt;
+                return raw_mbps.min(300.0);
             }
         }
 
         // 3. Fallback to latest sample turnaround
         let last_sample = self.recent_samples.last().unwrap();
         let sec = (last_sample.ack_turnaround_us as f64) / 1_000_000.0;
-        if sec > 0.0001 {
-            ((last_sample.bytes as f64) / (1024.0 * 1024.0)) / sec
+        if sec > 0.0005 {
+            let raw_mbps = ((last_sample.bytes as f64) / (1024.0 * 1024.0)) / sec;
+            raw_mbps.min(300.0)
         } else {
             0.0
         }

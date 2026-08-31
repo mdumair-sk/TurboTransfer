@@ -57,6 +57,14 @@ impl MetaActorHandle {
             .await;
     }
 
+    pub fn try_send_chunk_completed(&self, chunk_id: u32, transport: TransportType, bytes: u64) {
+        let _ = self.tx.try_send(ActorMessage::ChunkCompleted {
+            chunk_id,
+            transport,
+            bytes,
+        });
+    }
+
     pub async fn send_chunk_failed(&self, chunk_id: u32, transport: TransportType) {
         let _ = self
             .tx
@@ -154,10 +162,25 @@ impl MetaActor {
         self.dirty_events = 0;
     }
 
-    async fn run(&mut self) {
-        let mut timer = interval_at(Instant::now() + Duration::from_millis(250), Duration::from_millis(250));
-        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    async fn flush_async(&mut self) {
+        self.meta.completed_ranges = coalesce_ranges(&self.completed_set);
+        self.meta.updated_at = Utc::now().to_rfc3339();
 
+        let path = self.meta_path.clone();
+        if let Ok(json) = serde_json::to_string_pretty(&self.meta) {
+            let _ = tokio::task::spawn_blocking(move || {
+                if let Some(parent) = path.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                let _ = fs::write(&path, json);
+            }).await;
+        }
+        self.dirty_events = 0;
+    }
+
+    async fn run(&mut self) {
+        let mut timer = interval_at(Instant::now() + Duration::from_millis(1000), Duration::from_millis(1000));
+        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
             tokio::select! {
@@ -166,14 +189,14 @@ impl MetaActor {
                         Some(msg) => {
                             let should_exit = self.handle_message(msg);
                             if should_exit {
-                                self.flush_sync();
+                                self.flush_async().await;
                                 break;
                             }
                         }
                         None => {
                             // Channel closed (all handles dropped)
                             if self.dirty_events > 0 {
-                                self.flush_sync();
+                                self.flush_async().await;
                             }
                             break;
                         }
@@ -181,7 +204,7 @@ impl MetaActor {
                 }
                 _ = timer.tick() => {
                     if self.dirty_events > 0 {
-                        self.flush_sync();
+                        self.flush_async().await;
                     }
                 }
             }
@@ -203,10 +226,6 @@ impl MetaActor {
                     TransportType::WifiDirect => self.meta.transport_stats.wifi_direct.bytes += bytes,
                 }
                 self.dirty_events += 1;
-
-                if self.dirty_events >= 10 {
-                    self.flush_sync();
-                }
                 false
             }
             ActorMessage::ChunkFailed { transport, .. } => {

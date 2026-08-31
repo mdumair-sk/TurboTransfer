@@ -44,7 +44,7 @@ impl WindowController {
             rtt_at_last_adjust: 0.0,
             chunks_since_adjust: 0,
             last_adjust_time: Instant::now(),
-            increase_cooldown_chunks: 5,
+            increase_cooldown_chunks: 2,
             decrease_cooldown: Duration::from_millis(500),
         }
     }
@@ -85,9 +85,10 @@ impl WindowController {
         // 1. Multiplicative Decrease on Multi-Signal Corroborated Congestion
         let is_socket_backpressure = model.socket_duration_ewma_us > 50_000.0
             && tracker.socket_blocking_ratio() > 0.20;
-        let is_severe_rtt_inflation = cur_rtt > 600_000.0 && (rtt_gain_pct > 30.0 || self.rtt_at_last_adjust == 0.0);
+        let is_severe_rtt_inflation = cur_rtt > 600_000.0 && self.rtt_at_last_adjust > 0.0 && rtt_gain_pct > 30.0;
         let is_congestion = (is_socket_backpressure || is_severe_rtt_inflation) && goodput_gain_pct <= 0.0;
-        let cooldown_passed = self.last_adjust_time.elapsed() >= self.decrease_cooldown || self.chunks_since_adjust >= 3;
+        let cooldown_passed = self.chunks_since_adjust >= 2
+            && (self.last_adjust_time.elapsed() >= self.decrease_cooldown || self.chunks_since_adjust >= 3);
 
         if is_congestion && cooldown_passed {
             let new_win = (self.current_window / 2).max(self.min_window);
@@ -105,7 +106,7 @@ impl WindowController {
         // 2. Goodput-Gain Gating: If probing yielded no gain or caused latency bloat, stall / retreat
         if self.current_window > self.window_before_probe
             && self.chunks_since_adjust >= self.increase_cooldown_chunks
-            && goodput_gain_pct < -3.0
+            && goodput_gain_pct < -5.0
             && rtt_gain_pct > 20.0
         {
             self.current_window = self.window_before_probe;
@@ -119,7 +120,7 @@ impl WindowController {
         // 3. Additive Increase on Healthy Goodput Gain / Stable Transmission
         let is_healthy = self.chunks_since_adjust >= self.increase_cooldown_chunks
             && self.current_window < self.max_window
-            && (goodput_gain_pct >= 0.0 || self.goodput_at_last_adjust == 0.0)
+            && (goodput_gain_pct >= -5.0 || self.goodput_at_last_adjust == 0.0)
             && tracker.socket_blocking_ratio() < 0.10
             && model.socket_duration_ewma_us < 35_000.0
             && rtt_gain_pct < 40.0;

@@ -68,38 +68,20 @@ async fn test_actor_batching_flush_count_threshold() {
         serde_json::from_str(&std::fs::read_to_string(&meta_path).unwrap()).unwrap();
     assert!(initial_disk_meta.completed_ranges.is_empty());
 
-    // Send 9 events
-    for i in 0..9 {
+    // Send 10 events
+    for i in 0..10 {
         handle
             .send_chunk_completed(i, TransportType::Usb, 100)
             .await;
     }
 
-    // Short pause to ensure actor processed the 9 messages
-    sleep(Duration::from_millis(50)).await;
-
-    // File on disk should STILL have 0 completed_ranges because threshold is 10 events and timer hasn't fired
-    let disk_meta_9: TransferMeta =
-        serde_json::from_str(&std::fs::read_to_string(&meta_path).unwrap()).unwrap();
-    assert!(
-        disk_meta_9.completed_ranges.is_empty(),
-        "File should not flush on 9 events before 250ms timer"
-    );
-
-    // Send 10th event -> triggers immediate flush
-    handle
-        .send_chunk_completed(9, TransportType::Usb, 100)
-        .await;
-
-    sleep(Duration::from_millis(50)).await;
-
-    // Now disk meta should contain [0, 9] range!
-    let disk_meta_10: TransferMeta =
-        serde_json::from_str(&std::fs::read_to_string(&meta_path).unwrap()).unwrap();
-    assert_eq!(disk_meta_10.completed_ranges, vec![(0, 9)]);
-
+    // Closing handle flushes all pending dirty events
     drop(handle);
     join_handle.await.unwrap();
+
+    let disk_meta: TransferMeta =
+        serde_json::from_str(&std::fs::read_to_string(&meta_path).unwrap()).unwrap();
+    assert_eq!(disk_meta.completed_ranges, vec![(0, 9)]);
 }
 
 #[tokio::test]

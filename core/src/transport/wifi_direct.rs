@@ -306,8 +306,7 @@ impl WifiDirectTransport {
     }
 
     /// Android Local-Only Hotspot addresses are vendor-assigned. Once Windows
-    /// has joined the SSID, use the active default route instead of guessing a
-    /// fixed 192.168.x.x gateway.
+    /// has joined the SSID, use the active default route on the Wi-Fi adapter.
     #[cfg(target_os = "windows")]
     pub fn resolve_windows_default_gateway() -> Result<String, TransportError> {
         use std::process::Command;
@@ -317,7 +316,7 @@ impl WifiDirectTransport {
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                "Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' | Where-Object { $_.NextHop -ne '0.0.0.0' } | Sort-Object RouteMetric | Select-Object -First 1 -ExpandProperty NextHop",
+                "Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' | Where-Object { $_.NextHop -ne '0.0.0.0' } | Sort-Object { if ($_.InterfaceAlias -like '*Wi-Fi*' -or $_.InterfaceAlias -like '*Wireless*' -or $_.InterfaceAlias -like '*WLAN*') { 0 } else { 1 } }, RouteMetric | Select-Object -First 1 -ExpandProperty NextHop",
             ])
             .output()
             .map_err(|e| TransportError::Other(format!("Failed to resolve hotspot gateway: {e}")))?;
@@ -331,9 +330,40 @@ impl WifiDirectTransport {
         Ok(gateway.to_string())
     }
 
+    #[cfg(target_os = "windows")]
+    pub fn resolve_windows_all_gateways() -> Vec<String> {
+        use std::process::Command;
+
+        let output = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' | Where-Object { $_.NextHop -ne '0.0.0.0' } | Sort-Object { if ($_.InterfaceAlias -like '*Wi-Fi*' -or $_.InterfaceAlias -like '*Wireless*' -or $_.InterfaceAlias -like '*WLAN*') { 0 } else { 1 } }, RouteMetric | Select-Object -ExpandProperty NextHop",
+            ])
+            .output();
+
+        if let Ok(out) = output {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            stdout
+                .lines()
+                .map(str::trim)
+                .filter(|line| line.parse::<std::net::Ipv4Addr>().is_ok())
+                .map(|s| s.to_string())
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
     #[cfg(not(target_os = "windows"))]
     pub fn resolve_windows_default_gateway() -> Result<String, TransportError> {
         Err(TransportError::Other("Not on windows".into()))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    pub fn resolve_windows_all_gateways() -> Vec<String> {
+        Vec::new()
     }
 
     /// Generates the XML profile and triggers Windows WLAN association via `netsh`.

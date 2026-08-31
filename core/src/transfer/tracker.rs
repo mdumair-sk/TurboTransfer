@@ -48,6 +48,19 @@ impl InMemoryChunkTracker {
         }
         tracker
     }
+
+    /// Returns the list of uncompleted chunk IDs for a file.
+    pub fn get_missing_chunks(&self, file_size: u64, chunk_size: u32) -> Vec<u32> {
+        let total = crate::chunk::total_chunks(file_size, chunk_size);
+        let mut missing = Vec::new();
+        let completed_set: HashSet<u32> = self.completed.iter().map(|&(_, _, cid, _)| cid).collect();
+        for cid in 0..total {
+            if !completed_set.contains(&cid) {
+                missing.push(cid);
+            }
+        }
+        missing
+    }
 }
 
 impl ChunkTracker for InMemoryChunkTracker {

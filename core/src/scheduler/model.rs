@@ -100,8 +100,8 @@ impl ChannelPerformanceModel {
             let diff = sample_mbps - self.goodput_ewma_mbps;
             self.goodput_ewma_mbps += self.alpha_throughput * diff;
             self.throughput_ewma_mbps = self.goodput_ewma_mbps;
-            self.goodput_variance = (1.0 - self.alpha_throughput) * self.goodput_variance
-                + self.alpha_throughput * diff * diff;
+            self.goodput_variance = ((1.0 - self.alpha_throughput) * self.goodput_variance
+                + self.alpha_throughput * diff * diff).max(0.0);
             self.throughput_variance = self.goodput_variance;
         }
 
@@ -113,8 +113,8 @@ impl ChannelPerformanceModel {
         } else {
             let diff = ack_us - self.ack_turnaround_ewma_us;
             self.ack_turnaround_ewma_us += self.alpha_ack * diff;
-            self.ack_turnaround_variance = (1.0 - self.alpha_ack) * self.ack_turnaround_variance
-                + self.alpha_ack * diff * diff;
+            self.ack_turnaround_variance = ((1.0 - self.alpha_ack) * self.ack_turnaround_variance
+                + self.alpha_ack * diff * diff).max(0.0);
         }
 
         // 3. Socket Send Duration EWMA & Variance
@@ -125,8 +125,8 @@ impl ChannelPerformanceModel {
         } else {
             let diff = sock_us - self.socket_duration_ewma_us;
             self.socket_duration_ewma_us += self.alpha_socket * diff;
-            self.socket_duration_variance = (1.0 - self.alpha_socket) * self.socket_duration_variance
-                + self.alpha_socket * diff * diff;
+            self.socket_duration_variance = ((1.0 - self.alpha_socket) * self.socket_duration_variance
+                + self.alpha_socket * diff * diff).max(0.0);
         }
 
         // 4. Update Capacity Estimate (bounded and smoothed)

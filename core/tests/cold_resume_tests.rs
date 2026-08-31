@@ -242,3 +242,89 @@ async fn test_api_resume_transfer_multipath() {
     let out_crc = compute_file_crc32c(&output_file).unwrap();
     assert_eq!(expected_crc, out_crc);
 }
+
+#[tokio::test]
+async fn test_live_transfer_meta_actor_auto_persistence() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let src_path = temp_dir.path().join("auto_meta.bin");
+    let dest_dir = temp_dir.path().join("auto_dest");
+    let meta_dir = temp_dir.path().join("auto_meta");
+    std::fs::create_dir_all(&dest_dir).unwrap();
+    std::fs::create_dir_all(&meta_dir).unwrap();
+
+    let file_size = 2 * 1024 * 1024; // 2 MB (2 chunks of 1 MB)
+    let chunk_size = 1024 * 1024; // 1 MB
+    let source_bytes = vec![0xAB; file_size];
+    std::fs::write(&src_path, &source_bytes).unwrap();
+
+    let transfer_id = Uuid::new_v4();
+    let meta_file = meta_dir.join(format!("{}.meta.json", transfer_id));
+
+    let initial_meta = TransferMeta::new(
+        transfer_id,
+        Uuid::new_v4(),
+        "auto_meta.bin".to_string(),
+        file_size as u64,
+        chunk_size as u32,
+        2,
+        TransferRole::Sender,
+        Uuid::nil(),
+    );
+
+    let (actor_handle, actor_join) = MetaActor::spawn(meta_file.clone(), initial_meta, 100);
+    turbotransfer_core::transfer::api::set_transfer_actor_handle(transfer_id, actor_handle.clone());
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listen_addr = listener.local_addr().unwrap();
+
+    let dest_dir_clone = dest_dir.clone();
+    let recv_handle = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let transport = TcpTransport::from_stream(stream);
+        let mut tracker = InMemoryChunkTracker::new();
+        receive_file_session(
+            Uuid::new_v4(),
+            "AutoReceiver",
+            &dest_dir_clone,
+            &mut tracker,
+            transport,
+        )
+        .await
+    });
+
+    let client_stream = TcpStream::connect(listen_addr).await.unwrap();
+    let sender_transport = TcpTransport::from_stream(client_stream);
+
+    let send_handle = tokio::spawn(async move {
+        send_file_session(
+            Uuid::new_v4(),
+            "AutoSender",
+            &src_path,
+            chunk_size as u32,
+            transfer_id,
+            sender_transport,
+            Some("auto_meta.bin"),
+            Some(true),
+        )
+        .await
+    });
+
+    let (send_res, recv_res) = tokio::join!(send_handle, recv_handle);
+    send_res.unwrap().unwrap();
+    recv_res.unwrap().unwrap();
+
+    // Flush actor state to disk
+    actor_handle.pause().await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    drop(actor_handle);
+    let _ = actor_join.await;
+
+    // Verify meta.json on disk automatically recorded completed chunks [0, 1]
+    let meta_content = std::fs::read_to_string(&meta_file).unwrap();
+    let saved_meta: TransferMeta = serde_json::from_str(&meta_content).unwrap();
+    assert_eq!(
+        saved_meta.completed_ranges,
+        vec![(0, 1)],
+        "Live transfer must automatically populate completed_ranges in meta.json"
+    );
+}

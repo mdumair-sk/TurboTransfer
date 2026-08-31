@@ -175,7 +175,7 @@ fn test_high_rtt_high_bandwidth_decoupling() {
     // Simulating 12 chunks in flight with 800ms RTT and 66ms inter-ACK arrival (30 MB/s goodput)
     for i in 0..15 {
         wifi_tracker.record_chunk_sent(i, chunk_size);
-        wifi_tracker.last_inter_ack_us = Some(66_666); // 2MB every ~66.7ms = 30 MB/s
+        wifi_tracker.last_ack_time = Some(Instant::now().checked_sub(std::time::Duration::from_micros(66_666)).unwrap());
         simulate_chunk_ack(&mut wifi_tracker, &mut wifi_model, i, chunk_size, 800_000, 2_000, Some(1_500));
     }
 

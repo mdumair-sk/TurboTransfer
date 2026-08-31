@@ -67,7 +67,7 @@ function Invoke-PhoneSSH {
         & ssh @sshArgs localhost
     } else {
         $sshArgs += @("localhost", $RemoteCommand)
-        & ssh @sshArgs
+        & ssh @sshArgs 2>&1 | ForEach-Object { Write-Host $_ }
     }
 }
 
