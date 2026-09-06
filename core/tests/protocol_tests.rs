@@ -21,6 +21,7 @@ fn sample_messages() -> Vec<Message> {
             chunk_size: 67_108_864,
             total_chunks: 203,
             checksum_algo: "xxhash64".into(),
+            purpose: turbotransfer_core::benchmark::TransferPurpose::Normal,
         }),
         Message::TransferAccept(TransferAcceptData {
             transfer_id: t_id,

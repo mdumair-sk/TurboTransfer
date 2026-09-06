@@ -197,6 +197,7 @@ pub struct AppState {
     pub benchmark_size_mb: u32,
     pub benchmark_result: Option<BenchmarkResult>,
     pub is_benchmarking: bool,
+    pub benchmark_rx: Option<tokio::sync::mpsc::UnboundedReceiver<Result<BenchmarkResult, String>>>,
 }
 
 impl Default for AppState {
@@ -241,6 +242,7 @@ impl AppState {
             benchmark_size_mb: 250,
             benchmark_result: None,
             is_benchmarking: false,
+            benchmark_rx: None,
         };
 
         app.refresh_browser_entries();
@@ -425,6 +427,30 @@ impl AppState {
                 self.active_progress = Some(p);
             }
         }
+
+        if let Some(mut rx) = self.benchmark_rx.take() {
+            match rx.try_recv() {
+                Ok(res) => {
+                    self.is_benchmarking = false;
+                    match res {
+                        Ok(b) => {
+                            self.benchmark_result = Some(b);
+                            self.status_message = Some("Benchmark completed successfully".to_string());
+                            self.navigate_to(Screen::BenchmarkResults);
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Benchmark failed: {}", e));
+                        }
+                    }
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                    self.benchmark_rx = Some(rx);
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    self.is_benchmarking = false;
+                }
+            }
+        }
     }
 
     /// Pauses active transfer (`[P]` shortcut per TRD §13).
@@ -466,30 +492,27 @@ impl AppState {
 
     /// Executes benchmark via Transfer API `run_benchmark` (§7, §13).
     pub fn run_benchmark_action(&mut self) {
+        if self.is_benchmarking {
+            return;
+        }
         self.is_benchmarking = true;
+        self.status_message = Some("Running benchmark push...".to_string());
+
         let pref = match self.benchmark_transport_index {
             1 => TransportPreference::Combined,
             2 => TransportPreference::UsbOnly,
             3 => TransportPreference::WifiDirectOnly,
             _ => TransportPreference::Automatic,
         };
-        let _size = self.benchmark_size_mb;
+        let size = self.benchmark_size_mb;
 
-        // Perform synchronous simulation or spawn
-        let res = BenchmarkResult {
-            device_id: Uuid::nil(),
-            transport: pref,
-            throughput_mbps: match pref {
-                TransportPreference::Combined => 52.4,
-                TransportPreference::WifiDirectOnly => 36.8,
-                TransportPreference::UsbOnly => 10.6,
-                TransportPreference::Automatic => 53.1,
-            },
-        };
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        self.benchmark_rx = Some(rx);
 
-        self.benchmark_result = Some(res);
-        self.is_benchmarking = false;
-        self.navigate_to(Screen::BenchmarkResults);
+        tokio::spawn(async move {
+            let res = turbotransfer_core::transfer::api::run_benchmark(None, pref, size).await;
+            let _ = tx.send(res.map_err(|e| e.to_string()));
+        });
     }
 
     /// Moves selection down in the current list/menu.

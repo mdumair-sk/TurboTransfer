@@ -238,6 +238,7 @@ async fn test_idempotent_duplicate_chunk() {
             chunk_size: 64,
             total_chunks: 1,
             checksum_algo: "xxhash64".into(),
+            purpose: turbotransfer_core::benchmark::TransferPurpose::Normal,
         });
         send_msg(&mut client_write, &offer).await.unwrap();
         let _accept = reader.read_frame().await.unwrap().unwrap();

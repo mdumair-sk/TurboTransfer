@@ -1,12 +1,44 @@
 use chrono::Utc;
 use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use uuid::Uuid;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{interval_at, Instant};
 
 use super::schema::{coalesce_ranges, expand_ranges, TransferMeta, TransferStatus};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MessageOutcome {
+    Continue,
+    Flush,
+    Exit,
+}
+
+fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp_path = path.with_extension(format!("tmp.{}", Uuid::new_v4()));
+    fs::write(&tmp_path, content)?;
+
+    #[cfg(windows)]
+    {
+        if fs::rename(&tmp_path, path).is_err() {
+            let _ = fs::remove_file(path);
+            if let Err(e) = fs::rename(&tmp_path, path) {
+                let _ = fs::remove_file(&tmp_path);
+                return Err(e);
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        fs::rename(&tmp_path, path)?;
+    }
+    Ok(())
+}
 
 
 
@@ -152,12 +184,8 @@ impl MetaActor {
         self.meta.completed_ranges = coalesce_ranges(&self.completed_set);
         self.meta.updated_at = Utc::now().to_rfc3339();
 
-        if let Some(parent) = self.meta_path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-
         if let Ok(json) = serde_json::to_string_pretty(&self.meta) {
-            let _ = fs::write(&self.meta_path, json);
+            let _ = write_atomic(&self.meta_path, &json);
         }
         self.dirty_events = 0;
     }
@@ -169,10 +197,7 @@ impl MetaActor {
         let path = self.meta_path.clone();
         if let Ok(json) = serde_json::to_string_pretty(&self.meta) {
             let _ = tokio::task::spawn_blocking(move || {
-                if let Some(parent) = path.parent() {
-                    let _ = fs::create_dir_all(parent);
-                }
-                let _ = fs::write(&path, json);
+                let _ = write_atomic(&path, &json);
             }).await;
         }
         self.dirty_events = 0;
@@ -187,10 +212,15 @@ impl MetaActor {
                 maybe_msg = self.rx.recv() => {
                     match maybe_msg {
                         Some(msg) => {
-                            let should_exit = self.handle_message(msg);
-                            if should_exit {
-                                self.flush_async().await;
-                                break;
+                            match self.handle_message(msg) {
+                                MessageOutcome::Continue => {}
+                                MessageOutcome::Flush => {
+                                    self.flush_async().await;
+                                }
+                                MessageOutcome::Exit => {
+                                    self.flush_async().await;
+                                    break;
+                                }
                             }
                         }
                         None => {
@@ -212,8 +242,8 @@ impl MetaActor {
     }
 
     /// Handles a single incoming actor message.
-    /// Returns `true` if the actor loop should terminate.
-    fn handle_message(&mut self, msg: ActorMessage) -> bool {
+    /// Returns `MessageOutcome` indicating if the actor should flush or exit.
+    fn handle_message(&mut self, msg: ActorMessage) -> MessageOutcome {
         match msg {
             ActorMessage::ChunkCompleted {
                 chunk_id,
@@ -226,7 +256,11 @@ impl MetaActor {
                     TransportType::WifiDirect => self.meta.transport_stats.wifi_direct.bytes += bytes,
                 }
                 self.dirty_events += 1;
-                false
+                if self.dirty_events >= 50 {
+                    MessageOutcome::Flush
+                } else {
+                    MessageOutcome::Continue
+                }
             }
             ActorMessage::ChunkFailed { transport, .. } => {
                 match transport {
@@ -242,29 +276,31 @@ impl MetaActor {
                 self.dirty_events += 1;
 
                 if self.dirty_events >= 10 {
-                    self.flush_sync();
+                    MessageOutcome::Flush
+                } else {
+                    MessageOutcome::Continue
                 }
-                false
             }
             ActorMessage::TransportStatusChanged { .. } => {
                 self.dirty_events += 1;
                 if self.dirty_events >= 10 {
-                    self.flush_sync();
+                    MessageOutcome::Flush
+                } else {
+                    MessageOutcome::Continue
                 }
-                false
             }
             ActorMessage::Pause => {
                 self.meta.status = TransferStatus::Paused;
-                true // Exit loop & flush
+                MessageOutcome::Exit
             }
             ActorMessage::Cancel => {
                 self.meta.status = TransferStatus::Cancelled;
-                true // Exit loop & flush
+                MessageOutcome::Exit
             }
             ActorMessage::GetMeta(reply) => {
                 self.meta.completed_ranges = coalesce_ranges(&self.completed_set);
                 let _ = reply.send(self.meta.clone());
-                false
+                MessageOutcome::Continue
             }
         }
     }

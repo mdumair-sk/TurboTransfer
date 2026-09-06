@@ -1,3 +1,4 @@
+pub mod benchmark;
 pub mod checksum;
 pub mod chunk;
 pub mod manifest;

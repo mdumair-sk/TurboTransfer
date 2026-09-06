@@ -653,6 +653,37 @@ internal open class UniffiForeignFutureStructVoid(
 internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureStructVoid.UniffiByValue,)
 }
+internal interface UniffiCallbackInterfaceFfiCalibrationProgressCallbackMethod0 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`update`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+@Structure.FieldOrder("onProgress", "uniffiFree")
+internal open class UniffiVTableCallbackInterfaceFfiCalibrationProgressCallback(
+    @JvmField internal var `onProgress`: UniffiCallbackInterfaceFfiCalibrationProgressCallbackMethod0? = null,
+    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+) : Structure() {
+    class UniffiByValue(
+        `onProgress`: UniffiCallbackInterfaceFfiCalibrationProgressCallbackMethod0? = null,
+        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+    ): UniffiVTableCallbackInterfaceFfiCalibrationProgressCallback(`onProgress`,`uniffiFree`,), Structure.ByValue
+
+   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceFfiCalibrationProgressCallback) {
+        `onProgress` = other.`onProgress`
+        `uniffiFree` = other.`uniffiFree`
+    }
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -753,12 +784,19 @@ internal interface UniffiLib : Library {
             .also { lib: UniffiLib ->
                 uniffiCheckContractApiVersion(lib)
                 uniffiCheckApiChecksums(lib)
+                uniffiCallbackInterfaceFfiCalibrationProgressCallback.register(lib)
                 }
         }
         
     }
 
+    fun uniffi_turbotransfer_core_fn_init_callback_vtable_fficalibrationprogresscallback(`vtable`: UniffiVTableCallbackInterfaceFfiCalibrationProgressCallback,
+    ): Unit
+    fun uniffi_turbotransfer_core_fn_func_cancel_calibration(`targetKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_turbotransfer_core_fn_func_cancel_transfer(`transferId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_turbotransfer_core_fn_func_clear_saved_calibration(`targetKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_turbotransfer_core_fn_func_enter_receive_mode(`address`: RustBuffer.ByValue,`destDir`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -767,6 +805,8 @@ internal interface UniffiLib : Library {
     fun uniffi_turbotransfer_core_fn_func_get_devices(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_turbotransfer_core_fn_func_get_progress(`transferId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_turbotransfer_core_fn_func_get_saved_calibration(`targetKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_turbotransfer_core_fn_func_get_transfer_bottleneck_report(`transferId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -783,6 +823,10 @@ internal interface UniffiLib : Library {
     fun uniffi_turbotransfer_core_fn_func_pause_transfer(`transferId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_turbotransfer_core_fn_func_resume_transfer(`transferId`: RustBuffer.ByValue,`transportPref`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_turbotransfer_core_fn_func_run_benchmark(`targetDeviceId`: RustBuffer.ByValue,`address`: RustBuffer.ByValue,`transportPref`: RustBuffer.ByValue,`sizeMb`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_turbotransfer_core_fn_func_run_calibration(`targetDeviceId`: RustBuffer.ByValue,`address`: RustBuffer.ByValue,`callback`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_turbotransfer_core_fn_func_set_data_directory(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -902,7 +946,11 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_turbotransfer_core_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_turbotransfer_core_checksum_func_cancel_calibration(
+    ): Short
     fun uniffi_turbotransfer_core_checksum_func_cancel_transfer(
+    ): Short
+    fun uniffi_turbotransfer_core_checksum_func_clear_saved_calibration(
     ): Short
     fun uniffi_turbotransfer_core_checksum_func_enter_receive_mode(
     ): Short
@@ -911,6 +959,8 @@ internal interface UniffiLib : Library {
     fun uniffi_turbotransfer_core_checksum_func_get_devices(
     ): Short
     fun uniffi_turbotransfer_core_checksum_func_get_progress(
+    ): Short
+    fun uniffi_turbotransfer_core_checksum_func_get_saved_calibration(
     ): Short
     fun uniffi_turbotransfer_core_checksum_func_get_transfer_bottleneck_report(
     ): Short
@@ -928,11 +978,17 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_turbotransfer_core_checksum_func_resume_transfer(
     ): Short
+    fun uniffi_turbotransfer_core_checksum_func_run_benchmark(
+    ): Short
+    fun uniffi_turbotransfer_core_checksum_func_run_calibration(
+    ): Short
     fun uniffi_turbotransfer_core_checksum_func_set_data_directory(
     ): Short
     fun uniffi_turbotransfer_core_checksum_func_start_transfer(
     ): Short
     fun uniffi_turbotransfer_core_checksum_func_stop_receive_mode(
+    ): Short
+    fun uniffi_turbotransfer_core_checksum_method_fficalibrationprogresscallback_on_progress(
     ): Short
     fun ffi_turbotransfer_core_uniffi_contract_version(
     ): Int
@@ -951,7 +1007,13 @@ private fun uniffiCheckContractApiVersion(lib: UniffiLib) {
 
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: UniffiLib) {
+    if (lib.uniffi_turbotransfer_core_checksum_func_cancel_calibration() != 38690.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_turbotransfer_core_checksum_func_cancel_transfer() != 37359.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_turbotransfer_core_checksum_func_clear_saved_calibration() != 5075.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_turbotransfer_core_checksum_func_enter_receive_mode() != 40189.toShort()) {
@@ -964,6 +1026,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_turbotransfer_core_checksum_func_get_progress() != 59093.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_turbotransfer_core_checksum_func_get_saved_calibration() != 46597.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_turbotransfer_core_checksum_func_get_transfer_bottleneck_report() != 7569.toShort()) {
@@ -990,6 +1055,12 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_turbotransfer_core_checksum_func_resume_transfer() != 47857.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_turbotransfer_core_checksum_func_run_benchmark() != 14690.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_turbotransfer_core_checksum_func_run_calibration() != 42377.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_turbotransfer_core_checksum_func_set_data_directory() != 5757.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -997,6 +1068,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_turbotransfer_core_checksum_func_stop_receive_mode() != 23398.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_turbotransfer_core_checksum_method_fficalibrationprogresscallback_on_progress() != 20818.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -1220,6 +1294,62 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
 
 
 
+data class FfiBenchmarkResult (
+    var `targetDeviceId`: kotlin.String, 
+    var `avgSpeedMbps`: kotlin.Double, 
+    var `peakSpeedMbps`: kotlin.Double, 
+    var `usbAvgMbps`: kotlin.Double, 
+    var `wifiAvgMbps`: kotlin.Double, 
+    var `durationMs`: kotlin.ULong, 
+    var `bytesTransferred`: kotlin.ULong, 
+    var `timestampRfc3339`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiBenchmarkResult: FfiConverterRustBuffer<FfiBenchmarkResult> {
+    override fun read(buf: ByteBuffer): FfiBenchmarkResult {
+        return FfiBenchmarkResult(
+            FfiConverterString.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiBenchmarkResult) = (
+            FfiConverterString.allocationSize(value.`targetDeviceId`) +
+            FfiConverterDouble.allocationSize(value.`avgSpeedMbps`) +
+            FfiConverterDouble.allocationSize(value.`peakSpeedMbps`) +
+            FfiConverterDouble.allocationSize(value.`usbAvgMbps`) +
+            FfiConverterDouble.allocationSize(value.`wifiAvgMbps`) +
+            FfiConverterULong.allocationSize(value.`durationMs`) +
+            FfiConverterULong.allocationSize(value.`bytesTransferred`) +
+            FfiConverterString.allocationSize(value.`timestampRfc3339`)
+    )
+
+    override fun write(value: FfiBenchmarkResult, buf: ByteBuffer) {
+            FfiConverterString.write(value.`targetDeviceId`, buf)
+            FfiConverterDouble.write(value.`avgSpeedMbps`, buf)
+            FfiConverterDouble.write(value.`peakSpeedMbps`, buf)
+            FfiConverterDouble.write(value.`usbAvgMbps`, buf)
+            FfiConverterDouble.write(value.`wifiAvgMbps`, buf)
+            FfiConverterULong.write(value.`durationMs`, buf)
+            FfiConverterULong.write(value.`bytesTransferred`, buf)
+            FfiConverterString.write(value.`timestampRfc3339`, buf)
+    }
+}
+
+
+
 data class FfiBottleneckReport (
     var `transferId`: kotlin.String, 
     var `fileName`: kotlin.String, 
@@ -1324,6 +1454,138 @@ public object FfiConverterTypeFfiBottleneckReport: FfiConverterRustBuffer<FfiBot
 
 
 
+data class FfiCalibrationCandidateResult (
+    var `config`: FfiTransferConfigOverride, 
+    var `avgSpeedMbps`: kotlin.Double, 
+    var `durationMs`: kotlin.ULong, 
+    var `sweepStage`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiCalibrationCandidateResult: FfiConverterRustBuffer<FfiCalibrationCandidateResult> {
+    override fun read(buf: ByteBuffer): FfiCalibrationCandidateResult {
+        return FfiCalibrationCandidateResult(
+            FfiConverterTypeFfiTransferConfigOverride.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiCalibrationCandidateResult) = (
+            FfiConverterTypeFfiTransferConfigOverride.allocationSize(value.`config`) +
+            FfiConverterDouble.allocationSize(value.`avgSpeedMbps`) +
+            FfiConverterULong.allocationSize(value.`durationMs`) +
+            FfiConverterString.allocationSize(value.`sweepStage`)
+    )
+
+    override fun write(value: FfiCalibrationCandidateResult, buf: ByteBuffer) {
+            FfiConverterTypeFfiTransferConfigOverride.write(value.`config`, buf)
+            FfiConverterDouble.write(value.`avgSpeedMbps`, buf)
+            FfiConverterULong.write(value.`durationMs`, buf)
+            FfiConverterString.write(value.`sweepStage`, buf)
+    }
+}
+
+
+
+data class FfiCalibrationProgressUpdate (
+    var `currentStep`: kotlin.UInt, 
+    var `totalSteps`: kotlin.UInt, 
+    var `stage`: kotlin.String, 
+    var `configUnderTest`: FfiTransferConfigOverride, 
+    var `lastResultMbps`: kotlin.Double?
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiCalibrationProgressUpdate: FfiConverterRustBuffer<FfiCalibrationProgressUpdate> {
+    override fun read(buf: ByteBuffer): FfiCalibrationProgressUpdate {
+        return FfiCalibrationProgressUpdate(
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterTypeFfiTransferConfigOverride.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiCalibrationProgressUpdate) = (
+            FfiConverterUInt.allocationSize(value.`currentStep`) +
+            FfiConverterUInt.allocationSize(value.`totalSteps`) +
+            FfiConverterString.allocationSize(value.`stage`) +
+            FfiConverterTypeFfiTransferConfigOverride.allocationSize(value.`configUnderTest`) +
+            FfiConverterOptionalDouble.allocationSize(value.`lastResultMbps`)
+    )
+
+    override fun write(value: FfiCalibrationProgressUpdate, buf: ByteBuffer) {
+            FfiConverterUInt.write(value.`currentStep`, buf)
+            FfiConverterUInt.write(value.`totalSteps`, buf)
+            FfiConverterString.write(value.`stage`, buf)
+            FfiConverterTypeFfiTransferConfigOverride.write(value.`configUnderTest`, buf)
+            FfiConverterOptionalDouble.write(value.`lastResultMbps`, buf)
+    }
+}
+
+
+
+data class FfiCalibrationResult (
+    var `targetDeviceId`: kotlin.String, 
+    var `bestConfig`: FfiTransferConfigOverride, 
+    var `bestSpeedMbps`: kotlin.Double, 
+    var `allCandidates`: List<FfiCalibrationCandidateResult>, 
+    var `totalDurationMs`: kotlin.ULong, 
+    var `timestampRfc3339`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiCalibrationResult: FfiConverterRustBuffer<FfiCalibrationResult> {
+    override fun read(buf: ByteBuffer): FfiCalibrationResult {
+        return FfiCalibrationResult(
+            FfiConverterString.read(buf),
+            FfiConverterTypeFfiTransferConfigOverride.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterSequenceTypeFfiCalibrationCandidateResult.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiCalibrationResult) = (
+            FfiConverterString.allocationSize(value.`targetDeviceId`) +
+            FfiConverterTypeFfiTransferConfigOverride.allocationSize(value.`bestConfig`) +
+            FfiConverterDouble.allocationSize(value.`bestSpeedMbps`) +
+            FfiConverterSequenceTypeFfiCalibrationCandidateResult.allocationSize(value.`allCandidates`) +
+            FfiConverterULong.allocationSize(value.`totalDurationMs`) +
+            FfiConverterString.allocationSize(value.`timestampRfc3339`)
+    )
+
+    override fun write(value: FfiCalibrationResult, buf: ByteBuffer) {
+            FfiConverterString.write(value.`targetDeviceId`, buf)
+            FfiConverterTypeFfiTransferConfigOverride.write(value.`bestConfig`, buf)
+            FfiConverterDouble.write(value.`bestSpeedMbps`, buf)
+            FfiConverterSequenceTypeFfiCalibrationCandidateResult.write(value.`allCandidates`, buf)
+            FfiConverterULong.write(value.`totalDurationMs`, buf)
+            FfiConverterString.write(value.`timestampRfc3339`, buf)
+    }
+}
+
+
+
 data class FfiChannelMetric (
     var `channelName`: kotlin.String, 
     var `bytesTransferred`: kotlin.ULong, 
@@ -1415,6 +1677,82 @@ public object FfiConverterTypeFfiDeviceInfo: FfiConverterRustBuffer<FfiDeviceInf
             FfiConverterString.write(value.`deviceName`, buf)
             FfiConverterString.write(value.`transport`, buf)
             FfiConverterBoolean.write(value.`isConnected`, buf)
+    }
+}
+
+
+
+data class FfiSavedCalibrationConfig (
+    var `devicePairId`: kotlin.String, 
+    var `config`: FfiTransferConfigOverride, 
+    var `expectedSpeedMbps`: kotlin.Double, 
+    var `calibratedAtRfc3339`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiSavedCalibrationConfig: FfiConverterRustBuffer<FfiSavedCalibrationConfig> {
+    override fun read(buf: ByteBuffer): FfiSavedCalibrationConfig {
+        return FfiSavedCalibrationConfig(
+            FfiConverterString.read(buf),
+            FfiConverterTypeFfiTransferConfigOverride.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiSavedCalibrationConfig) = (
+            FfiConverterString.allocationSize(value.`devicePairId`) +
+            FfiConverterTypeFfiTransferConfigOverride.allocationSize(value.`config`) +
+            FfiConverterDouble.allocationSize(value.`expectedSpeedMbps`) +
+            FfiConverterString.allocationSize(value.`calibratedAtRfc3339`)
+    )
+
+    override fun write(value: FfiSavedCalibrationConfig, buf: ByteBuffer) {
+            FfiConverterString.write(value.`devicePairId`, buf)
+            FfiConverterTypeFfiTransferConfigOverride.write(value.`config`, buf)
+            FfiConverterDouble.write(value.`expectedSpeedMbps`, buf)
+            FfiConverterString.write(value.`calibratedAtRfc3339`, buf)
+    }
+}
+
+
+
+data class FfiTransferConfigOverride (
+    var `wifiStreamCount`: kotlin.UInt?, 
+    var `chunkSizeBytes`: kotlin.UInt?, 
+    var `wifiWindowPreset`: FfiWindowPreset?
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiTransferConfigOverride: FfiConverterRustBuffer<FfiTransferConfigOverride> {
+    override fun read(buf: ByteBuffer): FfiTransferConfigOverride {
+        return FfiTransferConfigOverride(
+            FfiConverterOptionalUInt.read(buf),
+            FfiConverterOptionalUInt.read(buf),
+            FfiConverterOptionalTypeFfiWindowPreset.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiTransferConfigOverride) = (
+            FfiConverterOptionalUInt.allocationSize(value.`wifiStreamCount`) +
+            FfiConverterOptionalUInt.allocationSize(value.`chunkSizeBytes`) +
+            FfiConverterOptionalTypeFfiWindowPreset.allocationSize(value.`wifiWindowPreset`)
+    )
+
+    override fun write(value: FfiTransferConfigOverride, buf: ByteBuffer) {
+            FfiConverterOptionalUInt.write(value.`wifiStreamCount`, buf)
+            FfiConverterOptionalUInt.write(value.`chunkSizeBytes`, buf)
+            FfiConverterOptionalTypeFfiWindowPreset.write(value.`wifiWindowPreset`, buf)
     }
 }
 
@@ -1891,6 +2229,122 @@ public object FfiConverterTypeFfiTransportPreference: FfiConverterRustBuffer<Ffi
 
 
 
+enum class FfiWindowPreset {
+    
+    CONSERVATIVE,
+    BALANCED,
+    AGGRESSIVE,
+    MAX;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiWindowPreset: FfiConverterRustBuffer<FfiWindowPreset> {
+    override fun read(buf: ByteBuffer) = try {
+        FfiWindowPreset.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: FfiWindowPreset) = 4UL
+
+    override fun write(value: FfiWindowPreset, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+
+public interface FfiCalibrationProgressCallback {
+    
+    fun `onProgress`(`update`: FfiCalibrationProgressUpdate)
+    
+    companion object
+}
+
+// Magic number for the Rust proxy to call using the same mechanism as every other method,
+// to free the callback once it's dropped by Rust.
+internal const val IDX_CALLBACK_FREE = 0
+// Callback return codes
+internal const val UNIFFI_CALLBACK_SUCCESS = 0
+internal const val UNIFFI_CALLBACK_ERROR = 1
+internal const val UNIFFI_CALLBACK_UNEXPECTED_ERROR = 2
+
+/**
+ * @suppress
+ */
+public abstract class FfiConverterCallbackInterface<CallbackInterface: Any>: FfiConverter<CallbackInterface, Long> {
+    internal val handleMap = UniffiHandleMap<CallbackInterface>()
+
+    internal fun drop(handle: Long) {
+        handleMap.remove(handle)
+    }
+
+    override fun lift(value: Long): CallbackInterface {
+        return handleMap.get(value)
+    }
+
+    override fun read(buf: ByteBuffer) = lift(buf.getLong())
+
+    override fun lower(value: CallbackInterface) = handleMap.insert(value)
+
+    override fun allocationSize(value: CallbackInterface) = 8UL
+
+    override fun write(value: CallbackInterface, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+// Put the implementation in an object so we don't pollute the top-level namespace
+internal object uniffiCallbackInterfaceFfiCalibrationProgressCallback {
+    internal object `onProgress`: UniffiCallbackInterfaceFfiCalibrationProgressCallbackMethod0 {
+        override fun callback(`uniffiHandle`: Long,`update`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeFfiCalibrationProgressCallback.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`onProgress`(
+                    FfiConverterTypeFfiCalibrationProgressUpdate.lift(`update`),
+                )
+            }
+            val writeReturn = { _: Unit -> Unit }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
+
+    internal object uniffiFree: UniffiCallbackInterfaceFree {
+        override fun callback(handle: Long) {
+            FfiConverterTypeFfiCalibrationProgressCallback.handleMap.remove(handle)
+        }
+    }
+
+    internal var vtable = UniffiVTableCallbackInterfaceFfiCalibrationProgressCallback.UniffiByValue(
+        `onProgress`,
+        uniffiFree,
+    )
+
+    // Registers the foreign callback with the Rust side.
+    // This method is generated for each callback interface.
+    internal fun register(lib: UniffiLib) {
+        lib.uniffi_turbotransfer_core_fn_init_callback_vtable_fficalibrationprogresscallback(vtable)
+    }
+}
+
+/**
+ * The ffiConverter which transforms the Callbacks in to handles to pass to Rust.
+ *
+ * @suppress
+ */
+public object FfiConverterTypeFfiCalibrationProgressCallback: FfiConverterCallbackInterface<FfiCalibrationProgressCallback>()
+
+
+
+
 /**
  * @suppress
  */
@@ -1948,6 +2402,38 @@ public object FfiConverterOptionalULong: FfiConverterRustBuffer<kotlin.ULong?> {
         } else {
             buf.put(1)
             FfiConverterULong.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalDouble: FfiConverterRustBuffer<kotlin.Double?> {
+    override fun read(buf: ByteBuffer): kotlin.Double? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterDouble.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.Double?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterDouble.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.Double?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterDouble.write(value, buf)
         }
     }
 }
@@ -2022,6 +2508,38 @@ public object FfiConverterOptionalTypeFfiBottleneckReport: FfiConverterRustBuffe
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeFfiSavedCalibrationConfig: FfiConverterRustBuffer<FfiSavedCalibrationConfig?> {
+    override fun read(buf: ByteBuffer): FfiSavedCalibrationConfig? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeFfiSavedCalibrationConfig.read(buf)
+    }
+
+    override fun allocationSize(value: FfiSavedCalibrationConfig?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeFfiSavedCalibrationConfig.allocationSize(value)
+        }
+    }
+
+    override fun write(value: FfiSavedCalibrationConfig?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeFfiSavedCalibrationConfig.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeFfiTransferProgress: FfiConverterRustBuffer<FfiTransferProgress?> {
     override fun read(buf: ByteBuffer): FfiTransferProgress? {
         if (buf.get().toInt() == 0) {
@@ -2054,6 +2572,70 @@ public object FfiConverterOptionalTypeFfiTransferProgress: FfiConverterRustBuffe
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeFfiWindowPreset: FfiConverterRustBuffer<FfiWindowPreset?> {
+    override fun read(buf: ByteBuffer): FfiWindowPreset? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeFfiWindowPreset.read(buf)
+    }
+
+    override fun allocationSize(value: FfiWindowPreset?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeFfiWindowPreset.allocationSize(value)
+        }
+    }
+
+    override fun write(value: FfiWindowPreset?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeFfiWindowPreset.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeFfiCalibrationProgressCallback: FfiConverterRustBuffer<FfiCalibrationProgressCallback?> {
+    override fun read(buf: ByteBuffer): FfiCalibrationProgressCallback? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeFfiCalibrationProgressCallback.read(buf)
+    }
+
+    override fun allocationSize(value: FfiCalibrationProgressCallback?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeFfiCalibrationProgressCallback.allocationSize(value)
+        }
+    }
+
+    override fun write(value: FfiCalibrationProgressCallback?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeFfiCalibrationProgressCallback.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.String>> {
     override fun read(buf: ByteBuffer): List<kotlin.String> {
         val len = buf.getInt()
@@ -2072,6 +2654,34 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterString.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeFfiCalibrationCandidateResult: FfiConverterRustBuffer<List<FfiCalibrationCandidateResult>> {
+    override fun read(buf: ByteBuffer): List<FfiCalibrationCandidateResult> {
+        val len = buf.getInt()
+        return List<FfiCalibrationCandidateResult>(len) {
+            FfiConverterTypeFfiCalibrationCandidateResult.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiCalibrationCandidateResult>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiCalibrationCandidateResult.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiCalibrationCandidateResult>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiCalibrationCandidateResult.write(it, buf)
         }
     }
 }
@@ -2214,11 +2824,27 @@ public object FfiConverterSequenceTypeFfiTransferSummary: FfiConverterRustBuffer
             FfiConverterTypeFfiTransferSummary.write(it, buf)
         }
     }
-} fun `cancelTransfer`(`transferId`: kotlin.String)
+} fun `cancelCalibration`(`targetKey`: kotlin.String)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_turbotransfer_core_fn_func_cancel_calibration(
+        FfiConverterString.lower(`targetKey`),_status)
+}
+    
+    
+ fun `cancelTransfer`(`transferId`: kotlin.String)
         = 
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_turbotransfer_core_fn_func_cancel_transfer(
         FfiConverterString.lower(`transferId`),_status)
+}
+    
+    
+ fun `clearSavedCalibration`(`targetKey`: kotlin.String)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_turbotransfer_core_fn_func_clear_saved_calibration(
+        FfiConverterString.lower(`targetKey`),_status)
 }
     
     
@@ -2256,6 +2882,15 @@ public object FfiConverterSequenceTypeFfiTransferSummary: FfiConverterRustBuffer
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_turbotransfer_core_fn_func_get_progress(
         FfiConverterString.lower(`transferId`),_status)
+}
+    )
+    }
+    
+ fun `getSavedCalibration`(`targetKey`: kotlin.String): FfiSavedCalibrationConfig? {
+            return FfiConverterOptionalTypeFfiSavedCalibrationConfig.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_turbotransfer_core_fn_func_get_saved_calibration(
+        FfiConverterString.lower(`targetKey`),_status)
 }
     )
     }
@@ -2327,6 +2962,26 @@ public object FfiConverterSequenceTypeFfiTransferSummary: FfiConverterRustBuffer
     uniffiRustCallWithError(FfiTransferException) { _status ->
     UniffiLib.INSTANCE.uniffi_turbotransfer_core_fn_func_resume_transfer(
         FfiConverterString.lower(`transferId`),FfiConverterTypeFfiTransportPreference.lower(`transportPref`),_status)
+}
+    )
+    }
+    
+
+    @Throws(FfiTransferException::class) fun `runBenchmark`(`targetDeviceId`: kotlin.String?, `address`: kotlin.String?, `transportPref`: FfiTransportPreference, `sizeMb`: kotlin.UInt?): FfiBenchmarkResult {
+            return FfiConverterTypeFfiBenchmarkResult.lift(
+    uniffiRustCallWithError(FfiTransferException) { _status ->
+    UniffiLib.INSTANCE.uniffi_turbotransfer_core_fn_func_run_benchmark(
+        FfiConverterOptionalString.lower(`targetDeviceId`),FfiConverterOptionalString.lower(`address`),FfiConverterTypeFfiTransportPreference.lower(`transportPref`),FfiConverterOptionalUInt.lower(`sizeMb`),_status)
+}
+    )
+    }
+    
+
+    @Throws(FfiTransferException::class) fun `runCalibration`(`targetDeviceId`: kotlin.String?, `address`: kotlin.String?, `callback`: FfiCalibrationProgressCallback?): FfiCalibrationResult {
+            return FfiConverterTypeFfiCalibrationResult.lift(
+    uniffiRustCallWithError(FfiTransferException) { _status ->
+    UniffiLib.INSTANCE.uniffi_turbotransfer_core_fn_func_run_calibration(
+        FfiConverterOptionalString.lower(`targetDeviceId`),FfiConverterOptionalString.lower(`address`),FfiConverterOptionalTypeFfiCalibrationProgressCallback.lower(`callback`),_status)
 }
     )
     }

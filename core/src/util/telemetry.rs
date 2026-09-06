@@ -221,6 +221,18 @@ impl TransferTelemetry {
         }
     }
 
+    pub fn get_peak_throughput_mbps(&self) -> f64 {
+        *self.peak_throughput_mbps.lock()
+    }
+
+    pub fn get_channel_bytes_transferred(&self) -> HashMap<String, u64> {
+        self.channels
+            .lock()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.bytes))
+            .collect()
+    }
+
     pub fn record_event(
         &self,
         stage: TransferStage,

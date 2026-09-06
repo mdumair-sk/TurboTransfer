@@ -78,12 +78,7 @@ pub struct TransferSummary {
     pub role: TransferRole,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BenchmarkResult {
-    pub device_id: Uuid,
-    pub transport: TransportPreference,
-    pub throughput_mbps: f64,
-}
+pub use crate::benchmark::BenchmarkResult;
 
 pub struct ActiveTransferRecord {
     pub transfer_id: Uuid,
@@ -284,6 +279,12 @@ pub fn register_active_transfer_with_path(
     );
 }
 
+/// Removes an active transfer from the global registry (e.g. upon completion of an ephemeral benchmark).
+pub fn remove_active_transfer(transfer_id: Uuid) {
+    let registry = get_registry();
+    registry.transfers.lock().unwrap().remove(&transfer_id);
+}
+
 /// Updates the MetaActor handle of an active transfer.
 pub fn set_transfer_actor_handle(transfer_id: Uuid, handle: MetaActorHandle) {
     let registry = get_registry();
@@ -382,6 +383,15 @@ pub async fn resolve_and_connect_transports(
     transport_pref: TransportPreference,
     address: Option<&str>,
 ) -> Result<(Vec<(Box<dyn Transport>, bool)>, Vec<String>), TransferSessionError> {
+    resolve_and_connect_transports_with_streams(transport_pref, address, None).await
+}
+
+pub async fn resolve_and_connect_transports_with_streams(
+    transport_pref: TransportPreference,
+    address: Option<&str>,
+    wifi_stream_count: Option<usize>,
+) -> Result<(Vec<(Box<dyn Transport>, bool)>, Vec<String>), TransferSessionError> {
+    let stream_count = wifi_stream_count.unwrap_or(DEFAULT_WIFI_PARALLEL_STREAMS).max(1);
     let addr_default = DEFAULT_LOOPBACK_ADDR.to_string();
     let addr = address.unwrap_or(&addr_default);
     let mut transports: Vec<(Box<dyn Transport>, bool)> = Vec::new();
@@ -401,7 +411,7 @@ pub async fn resolve_and_connect_transports(
         }
         TransportPreference::WifiDirectOnly => {
             if let Some(explicit_addr) = address {
-                for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
+                for stream_idx in 1..=stream_count {
                     if let Ok(transport) = TcpTransport::connect(explicit_addr).await {
                         transports.push((Box::new(transport), false));
                         transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
@@ -424,7 +434,7 @@ pub async fn resolve_and_connect_transports(
                     config.target_ip.clone()
                 };
                 let target_addr = format!("{}:{}", target_ip, config.port);
-                for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
+                for stream_idx in 1..=stream_count {
                     if let Ok(t) = TcpTransport::connect(&target_addr).await {
                         transports.push((Box::new(t), false));
                         transport_names.push(format!("5 GHz Local-Only Hotspot (Stream #{})", stream_idx));
@@ -450,7 +460,7 @@ pub async fn resolve_and_connect_transports(
                                     transport_names.push("USB (ADB Tunnel)".to_string());
                                 }
                             } else {
-                                for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
+                                for stream_idx in 1..=stream_count {
                                     if let Ok(t) = TcpTransport::connect(trimmed).await {
                                         transports.push((Box::new(t), false));
                                         transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
@@ -467,7 +477,7 @@ pub async fn resolve_and_connect_transports(
                             transport_names.push("USB (ADB Tunnel)".to_string());
                         }
                     } else {
-                        for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
+                        for stream_idx in 1..=stream_count {
                             if let Ok(t) = TcpTransport::connect(explicit_addr).await {
                                 transports.push((Box::new(t), false));
                                 transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
@@ -493,7 +503,7 @@ pub async fn resolve_and_connect_transports(
                 let probe_ips = get_windows_hotspot_probe_ips();
                 for hotspot_ip in &probe_ips {
                     let mut connected_any = false;
-                    for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
+                    for stream_idx in 1..=stream_count {
                         if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(500), TcpTransport::connect(hotspot_ip)).await {
                             if let Ok(transport) = t {
                                 transports.push((Box::new(transport), false));
@@ -527,7 +537,7 @@ pub async fn resolve_and_connect_transports(
                                     transport_names.push("USB (ADB Tunnel)".to_string());
                                 }
                             } else {
-                                for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
+                                for stream_idx in 1..=stream_count {
                                     if let Ok(Ok(t)) = tokio::time::timeout(tokio::time::Duration::from_millis(800), TcpTransport::connect(trimmed)).await {
                                         transports.push((Box::new(t), false));
                                         transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
@@ -544,7 +554,7 @@ pub async fn resolve_and_connect_transports(
                             transport_names.push("USB (ADB Tunnel)".to_string());
                         }
                     } else {
-                        for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
+                        for stream_idx in 1..=stream_count {
                             if let Ok(Ok(t)) = tokio::time::timeout(tokio::time::Duration::from_millis(800), TcpTransport::connect(explicit_addr)).await {
                                 transports.push((Box::new(t), false));
                                 transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
@@ -591,7 +601,7 @@ pub async fn resolve_and_connect_transports(
 
                     for hotspot_ip in &probe_ips {
                         let mut connected_any = false;
-                        for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
+                        for stream_idx in 1..=stream_count {
                             if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(500), TcpTransport::connect(hotspot_ip)).await {
                                 if let Ok(transport) = t {
                                     transports.push((Box::new(transport), false));
@@ -621,7 +631,7 @@ pub async fn resolve_and_connect_transports(
                     let probe_ips = get_windows_hotspot_probe_ips();
                     for hotspot_ip in &probe_ips {
                         let mut connected_any = false;
-                        for stream_idx in 1..=DEFAULT_WIFI_PARALLEL_STREAMS {
+                        for stream_idx in 1..=stream_count {
                             if let Ok(t) = tokio::time::timeout(tokio::time::Duration::from_millis(500), TcpTransport::connect(hotspot_ip)).await {
                                 if let Ok(transport) = t {
                                     transports.push((Box::new(transport), false));
@@ -697,8 +707,32 @@ pub async fn start_transfer(
         Ok(m) => m.len(),
         Err(e) => return Err(TransferSessionError::Io(e)),
     };
+    // Consult saved calibration config for device pair
+    let peer_key = address
+        .as_deref()
+        .or_else(|| device_id.map(|_| ""))
+        .unwrap_or("");
+    let saved_cal = if let Some(did) = device_id {
+        crate::benchmark::get_saved_calibration(&did.to_string())
+            .or_else(|| crate::benchmark::get_saved_calibration(peer_key))
+    } else {
+        crate::benchmark::get_saved_calibration(peer_key)
+    };
+
+    let (wifi_stream_override, chunk_size_override, wifi_window_preset) = if let Some(ref cal) = saved_cal {
+        (
+            cal.config.wifi_stream_count,
+            cal.config.chunk_size_bytes,
+            cal.config.wifi_window_preset,
+        )
+    } else {
+        (None, None, None)
+    };
+
     let is_high_speed = transport_pref == TransportPreference::UsbOnly || transport_pref == TransportPreference::Combined;
-    let chunk_size = crate::chunk::select_optimal_chunk_size(file_size, is_high_speed);
+    let chunk_size = chunk_size_override.unwrap_or_else(|| {
+        crate::chunk::select_optimal_chunk_size(file_size, is_high_speed)
+    });
     let plan = crate::chunk::calculate_chunk_plan(file_size, chunk_size);
     let total_chunks = plan.len().max(1) as u32;
 
@@ -736,7 +770,11 @@ pub async fn start_transfer(
     let (actor_handle, _actor_join) = MetaActor::spawn(meta_path, initial_meta, 100);
     set_transfer_actor_handle(transfer_id, actor_handle);
 
-    let (transports, transport_names) = match resolve_and_connect_transports(transport_pref, address.as_deref()).await {
+    let (transports, transport_names) = match resolve_and_connect_transports_with_streams(
+        transport_pref,
+        address.as_deref(),
+        wifi_stream_override,
+    ).await {
         Ok(res) => res,
         Err(e) => {
             log::error!("start_transfer connection failure: {}", e);
@@ -759,8 +797,13 @@ pub async fn start_transfer(
 
     update_transfer_transport_name(transfer_id, transport_name);
 
+    let session_opts = crate::transfer::session::SessionOptions {
+        purpose: crate::benchmark::TransferPurpose::Normal,
+        wifi_window_preset,
+    };
+
     crate::util::runtime::spawn_task(async move {
-        let res = send_file_session_multipath(
+        let res = crate::transfer::session::send_file_session_multipath_ext(
             sender_id,
             "TurboSender",
             &file_path,
@@ -768,6 +811,7 @@ pub async fn start_transfer(
             transfer_id,
             transports,
             custom_file_name.as_deref(),
+            session_opts,
         )
         .await;
 
@@ -899,6 +943,7 @@ struct ActiveReceiveSession {
     pub completed_chunks_count: Arc<AtomicU32>,
     pub is_completed: Arc<std::sync::atomic::AtomicBool>,
     pub is_sender_in_same_process: bool,
+    pub is_ephemeral: bool,
     pub telemetry: Arc<TransferTelemetry>,
 }
 
@@ -971,8 +1016,14 @@ async fn handle_incoming_receive_transport(
         if let Some(existing) = map.get(&offer.transfer_id) {
             existing.clone()
         } else {
-            std::fs::create_dir_all(&dest_dir)?;
-            let (part_path, final_path) = crate::util::storage::resolve_secure_paths(&dest_dir, &offer.file_name)?;
+            let is_ephemeral = offer.purpose != crate::benchmark::TransferPurpose::Normal;
+            let effective_dest = if is_ephemeral {
+                std::env::temp_dir().join("turbotransfer_bench")
+            } else {
+                dest_dir.clone()
+            };
+            std::fs::create_dir_all(&effective_dest)?;
+            let (part_path, final_path) = crate::util::storage::resolve_secure_paths(&effective_dest, &offer.file_name)?;
             let file = std::fs::OpenOptions::new()
                 .read(true)
                 .write(true)
@@ -994,14 +1045,16 @@ async fn handle_incoming_receive_transport(
                 None,
             );
 
-            register_active_transfer(
-                offer.transfer_id,
-                offer.file_name.clone(),
-                offer.file_size,
-                TransferRole::Receiver,
-                offer.total_chunks,
-                "Multi-Channel Ingestion".to_string(),
-            );
+            if !is_ephemeral {
+                register_active_transfer(
+                    offer.transfer_id,
+                    offer.file_name.clone(),
+                    offer.file_size,
+                    TransferRole::Receiver,
+                    offer.total_chunks,
+                    "Multi-Channel Ingestion".to_string(),
+                );
+            }
 
             let is_sender_in_same_process = {
                 let reg = get_registry();
@@ -1009,7 +1062,7 @@ async fn handle_incoming_receive_transport(
                 reg_map.get(&offer.transfer_id).map_or(false, |r| r.role == TransferRole::Sender)
             };
 
-            if !is_sender_in_same_process {
+            if !is_sender_in_same_process && !is_ephemeral {
                 let meta_path = default_data_dir().join(format!("{}.meta.json", offer.transfer_id));
                 let initial_meta = TransferMeta::new(
                     offer.transfer_id,
@@ -1066,9 +1119,13 @@ async fn handle_incoming_receive_transport(
                 }
             });
 
-            let tracker = if let Some((_, meta)) = find_resumable_transfer(Some(offer.transfer_id)) {
-                if !meta.completed_ranges.is_empty() {
-                    InMemoryChunkTracker::from_ranges(offer.transfer_id, offer.file_id, &meta.completed_ranges)
+            let tracker = if !is_ephemeral {
+                if let Some((_, meta)) = find_resumable_transfer(Some(offer.transfer_id)) {
+                    if !meta.completed_ranges.is_empty() {
+                        InMemoryChunkTracker::from_ranges(offer.transfer_id, offer.file_id, &meta.completed_ranges)
+                    } else {
+                        InMemoryChunkTracker::new()
+                    }
                 } else {
                     InMemoryChunkTracker::new()
                 }
@@ -1088,6 +1145,7 @@ async fn handle_incoming_receive_transport(
                 completed_chunks_count: Arc::new(AtomicU32::new(0)),
                 is_completed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 is_sender_in_same_process,
+                is_ephemeral,
                 telemetry: telemetry.clone(),
             });
             map.insert(offer.transfer_id, new_session.clone());
@@ -1300,8 +1358,13 @@ async fn handle_incoming_receive_transport(
                         )));
                     }
 
-                    std::fs::rename(&session.part_path, &session.file_path)?;
-                    set_transfer_status(complete_data.transfer_id, TransferStatus::Completed, None);
+                    if session.is_ephemeral {
+                        let _ = std::fs::remove_file(&session.part_path);
+                        let _ = std::fs::remove_file(&session.file_path);
+                    } else {
+                        std::fs::rename(&session.part_path, &session.file_path)?;
+                        set_transfer_status(complete_data.transfer_id, TransferStatus::Completed, None);
+                    }
 
                     let fin_ms = t_fin0.elapsed().as_millis() as u64;
                     session.telemetry.record_finalize(fin_ms, true);
@@ -1314,6 +1377,9 @@ async fn handle_incoming_receive_transport(
                         .lock()
                         .unwrap()
                         .remove(&complete_data.transfer_id);
+                    if session.is_ephemeral {
+                        get_registry().transfers.lock().unwrap().remove(&complete_data.transfer_id);
+                    }
                 }
 
                 // Send final completion ACK
@@ -2003,11 +2069,17 @@ pub fn get_transfers() -> Vec<TransferSummary> {
 pub async fn run_benchmark(
     device_id: Option<Uuid>,
     transport_pref: TransportPreference,
-    _payload_size_mb: u32,
+    payload_size_mb: u32,
 ) -> Result<BenchmarkResult, TransferSessionError> {
-    let _ = device_id;
-    let _ = transport_pref;
-    Err(TransferSessionError::Rejected(
-        "Live benchmarks are not implemented yet; refusing to report synthetic throughput".into(),
-    ))
+    crate::benchmark::runner::run_benchmark(device_id, None, transport_pref, Some(payload_size_mb)).await
+}
+
+/// Executes an isolated transport throughput benchmark to an explicit peer address.
+pub async fn run_benchmark_with_address(
+    device_id: Option<Uuid>,
+    address: Option<&str>,
+    transport_pref: TransportPreference,
+    payload_size_mb: u32,
+) -> Result<BenchmarkResult, TransferSessionError> {
+    crate::benchmark::runner::run_benchmark(device_id, address, transport_pref, Some(payload_size_mb)).await
 }

@@ -105,6 +105,36 @@ enum Commands {
         #[arg(short, long)]
         address: Option<String>,
     },
+
+    /// Run raw throughput benchmark to target peer
+    Benchmark {
+        /// Target device UUID
+        #[arg(short, long)]
+        device: Option<Uuid>,
+
+        /// Preferred transport layer
+        #[arg(short, long, value_enum, default_value_t = CliTransportPreference::Auto)]
+        transport: CliTransportPreference,
+
+        /// Target peer network address (e.g. 192.168.43.1:9876)
+        #[arg(short, long)]
+        address: Option<String>,
+
+        /// Payload size in MiB (default 250)
+        #[arg(short, long, default_value_t = 250)]
+        size: u32,
+    },
+
+    /// Run automated parameter calibration sweep to find optimal link settings
+    Calibrate {
+        /// Target device UUID
+        #[arg(short, long)]
+        device: Option<Uuid>,
+
+        /// Target peer network address (e.g. 192.168.43.1:9876)
+        #[arg(short, long)]
+        address: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -412,6 +442,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Cancel { transfer_id } => {
             cancel_transfer(transfer_id);
             println!("Cancelled transfer: {}", transfer_id);
+        }
+        Commands::Benchmark {
+            device,
+            transport,
+            address,
+            size,
+        } => {
+            println!("Initiating {} MB benchmark push...", size);
+            let res = turbotransfer_core::benchmark::run_benchmark(
+                device,
+                address.as_deref(),
+                transport.into(),
+                Some(size),
+            )
+            .await?;
+
+            println!("\n============================================================");
+            println!("                BENCHMARK RESULTS                           ");
+            println!("============================================================");
+            println!("Average Speed:  {:.2} MB/s", res.avg_speed_mbps);
+            println!("Peak Speed:     {:.2} MB/s", res.peak_speed_mbps);
+            println!("Duration:       {:.2} s ({} ms)", res.duration_ms as f64 / 1000.0, res.duration_ms);
+            println!("Total Payload:  {:.2} MB", res.bytes_transferred as f64 / (1024.0 * 1024.0));
+            println!("USB Throughput: {:.2} MB/s", res.usb_avg_mbps);
+            println!("Wi-Fi Throughput: {:.2} MB/s", res.wifi_avg_mbps);
+            println!("============================================================");
+        }
+        Commands::Calibrate { device, address } => {
+            struct CliCalibrationCallback;
+            impl turbotransfer_core::benchmark::CalibrationProgressCallback for CliCalibrationCallback {
+                fn on_progress(&self, update: turbotransfer_core::benchmark::CalibrationProgressUpdate) {
+                    let last_speed_str = match update.last_result_mbps {
+                        Some(speed) => format!(" | Last result: {:.1} MB/s", speed),
+                        None => String::new(),
+                    };
+                    println!(
+                        "[Step {}/{}] Testing stage '{}'...{}",
+                        update.current_step, update.total_steps, update.stage, last_speed_str
+                    );
+                }
+            }
+
+            let target_desc = address.as_deref().unwrap_or("default peer");
+            println!("Starting 10-step parameter calibration sweep for {}...", target_desc);
+            let callback = Box::new(CliCalibrationCallback);
+            let res = turbotransfer_core::benchmark::run_calibration(
+                device,
+                address.as_deref(),
+                Some(callback),
+            )
+            .await?;
+
+            println!("\n============================================================");
+            println!("               CALIBRATION COMPLETE                         ");
+            println!("============================================================");
+            println!("Optimal Speed:  {:.2} MB/s", res.best_speed_mbps);
+            println!("Streams:        {}", res.best_config.wifi_stream_count.unwrap_or(3));
+            println!("Chunk Size:     {} KiB", res.best_config.chunk_size_bytes.map(|b| b / 1024).unwrap_or(1024));
+            println!("Window Preset:  {:?}", res.best_config.wifi_window_preset.unwrap_or(turbotransfer_core::benchmark::WindowPreset::Balanced));
+            println!("Total Time:     {:.2} s", res.total_duration_ms as f64 / 1000.0);
+            println!("Profile saved to disk and will be applied automatically.");
+            println!("============================================================");
         }
     }
 

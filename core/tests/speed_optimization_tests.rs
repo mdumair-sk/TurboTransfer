@@ -305,6 +305,7 @@ async fn test_duplicate_chunk_crc_table_retention() {
             chunk_size: chunk_size as u32,
             total_chunks: 2,
             checksum_algo: "xxhash64".into(),
+            purpose: turbotransfer_core::benchmark::TransferPurpose::Normal,
         })).await.unwrap();
 
         let _ = client_transport.receive_frame().await.unwrap(); // accept

@@ -177,6 +177,177 @@ pub struct FfiWifiHotspotInfo {
     pub band: String,
 }
 
+#[derive(uniffi::Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FfiWindowPreset {
+    Conservative,
+    Balanced,
+    Aggressive,
+    Max,
+}
+
+impl From<crate::benchmark::WindowPreset> for FfiWindowPreset {
+    fn from(p: crate::benchmark::WindowPreset) -> Self {
+        match p {
+            crate::benchmark::WindowPreset::Conservative => Self::Conservative,
+            crate::benchmark::WindowPreset::Balanced => Self::Balanced,
+            crate::benchmark::WindowPreset::Aggressive => Self::Aggressive,
+            crate::benchmark::WindowPreset::Max => Self::Max,
+        }
+    }
+}
+
+impl From<FfiWindowPreset> for crate::benchmark::WindowPreset {
+    fn from(p: FfiWindowPreset) -> Self {
+        match p {
+            FfiWindowPreset::Conservative => Self::Conservative,
+            FfiWindowPreset::Balanced => Self::Balanced,
+            FfiWindowPreset::Aggressive => Self::Aggressive,
+            FfiWindowPreset::Max => Self::Max,
+        }
+    }
+}
+
+#[derive(uniffi::Record, Debug, Clone)]
+pub struct FfiTransferConfigOverride {
+    pub wifi_stream_count: Option<u32>,
+    pub chunk_size_bytes: Option<u32>,
+    pub wifi_window_preset: Option<FfiWindowPreset>,
+}
+
+impl From<crate::benchmark::TransferConfigOverride> for FfiTransferConfigOverride {
+    fn from(c: crate::benchmark::TransferConfigOverride) -> Self {
+        Self {
+            wifi_stream_count: c.wifi_stream_count.map(|s| s as u32),
+            chunk_size_bytes: c.chunk_size_bytes,
+            wifi_window_preset: c.wifi_window_preset.map(Into::into),
+        }
+    }
+}
+
+#[derive(uniffi::Record, Debug, Clone)]
+pub struct FfiBenchmarkResult {
+    pub target_device_id: String,
+    pub avg_speed_mbps: f64,
+    pub peak_speed_mbps: f64,
+    pub usb_avg_mbps: f64,
+    pub wifi_avg_mbps: f64,
+    pub duration_ms: u64,
+    pub bytes_transferred: u64,
+    pub timestamp_rfc3339: String,
+}
+
+impl From<crate::benchmark::BenchmarkResult> for FfiBenchmarkResult {
+    fn from(b: crate::benchmark::BenchmarkResult) -> Self {
+        Self {
+            target_device_id: b.target_device_id.to_string(),
+            avg_speed_mbps: b.avg_speed_mbps,
+            peak_speed_mbps: b.peak_speed_mbps,
+            usb_avg_mbps: b.usb_avg_mbps,
+            wifi_avg_mbps: b.wifi_avg_mbps,
+            duration_ms: b.duration_ms,
+            bytes_transferred: b.bytes_transferred,
+            timestamp_rfc3339: b.timestamp.to_rfc3339(),
+        }
+    }
+}
+
+#[derive(uniffi::Record, Debug, Clone)]
+pub struct FfiCalibrationCandidateResult {
+    pub config: FfiTransferConfigOverride,
+    pub avg_speed_mbps: f64,
+    pub duration_ms: u64,
+    pub sweep_stage: String,
+}
+
+impl From<crate::benchmark::CalibrationCandidateResult> for FfiCalibrationCandidateResult {
+    fn from(c: crate::benchmark::CalibrationCandidateResult) -> Self {
+        Self {
+            config: c.config.into(),
+            avg_speed_mbps: c.avg_speed_mbps,
+            duration_ms: c.duration_ms,
+            sweep_stage: c.sweep_stage,
+        }
+    }
+}
+
+#[derive(uniffi::Record, Debug, Clone)]
+pub struct FfiCalibrationResult {
+    pub target_device_id: String,
+    pub best_config: FfiTransferConfigOverride,
+    pub best_speed_mbps: f64,
+    pub all_candidates: Vec<FfiCalibrationCandidateResult>,
+    pub total_duration_ms: u64,
+    pub timestamp_rfc3339: String,
+}
+
+impl From<crate::benchmark::CalibrationResult> for FfiCalibrationResult {
+    fn from(c: crate::benchmark::CalibrationResult) -> Self {
+        Self {
+            target_device_id: c.target_device_id.to_string(),
+            best_config: c.best_config.into(),
+            best_speed_mbps: c.best_speed_mbps,
+            all_candidates: c.all_candidates.into_iter().map(Into::into).collect(),
+            total_duration_ms: c.total_duration_ms,
+            timestamp_rfc3339: c.timestamp.to_rfc3339(),
+        }
+    }
+}
+
+#[derive(uniffi::Record, Debug, Clone)]
+pub struct FfiSavedCalibrationConfig {
+    pub device_pair_id: String,
+    pub config: FfiTransferConfigOverride,
+    pub expected_speed_mbps: f64,
+    pub calibrated_at_rfc3339: String,
+}
+
+impl From<crate::benchmark::SavedCalibrationConfig> for FfiSavedCalibrationConfig {
+    fn from(s: crate::benchmark::SavedCalibrationConfig) -> Self {
+        Self {
+            device_pair_id: s.device_pair_id,
+            config: s.config.into(),
+            expected_speed_mbps: s.expected_speed_mbps,
+            calibrated_at_rfc3339: s.calibrated_at.to_rfc3339(),
+        }
+    }
+}
+
+#[derive(uniffi::Record, Debug, Clone)]
+pub struct FfiCalibrationProgressUpdate {
+    pub current_step: u32,
+    pub total_steps: u32,
+    pub stage: String,
+    pub config_under_test: FfiTransferConfigOverride,
+    pub last_result_mbps: Option<f64>,
+}
+
+impl From<crate::benchmark::CalibrationProgressUpdate> for FfiCalibrationProgressUpdate {
+    fn from(u: crate::benchmark::CalibrationProgressUpdate) -> Self {
+        Self {
+            current_step: u.current_step,
+            total_steps: u.total_steps,
+            stage: u.stage,
+            config_under_test: u.config_under_test.into(),
+            last_result_mbps: u.last_result_mbps,
+        }
+    }
+}
+
+#[uniffi::export(callback_interface)]
+pub trait FfiCalibrationProgressCallback: Send + Sync {
+    fn on_progress(&self, update: FfiCalibrationProgressUpdate);
+}
+
+pub struct FfiProgressBridge {
+    pub callback: Box<dyn FfiCalibrationProgressCallback>,
+}
+
+impl crate::benchmark::CalibrationProgressCallback for FfiProgressBridge {
+    fn on_progress(&self, update: crate::benchmark::CalibrationProgressUpdate) {
+        self.callback.on_progress(update.into());
+    }
+}
+
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum FfiTransferError {
     #[error("Transfer error: {msg}")]
@@ -463,4 +634,71 @@ pub fn get_transfers() -> Vec<FfiTransferSummary> {
             role: t.role.into(),
         })
         .collect()
+}
+
+#[uniffi::export]
+pub fn run_benchmark(
+    target_device_id: Option<String>,
+    address: Option<String>,
+    transport_pref: FfiTransportPreference,
+    size_mb: Option<u32>,
+) -> Result<FfiBenchmarkResult, FfiTransferError> {
+    let rt = get_runtime();
+    let dev_id = target_device_id.and_then(|s| Uuid::parse_str(&s).ok());
+    let addr = address.as_deref();
+    let res = rt
+        .block_on(async {
+            crate::benchmark::runner::run_benchmark(
+                dev_id,
+                addr,
+                transport_pref.into(),
+                size_mb,
+            )
+            .await
+        })
+        .map_err(|e| FfiTransferError::Generic { msg: e.to_string() })?;
+
+    Ok(res.into())
+}
+
+#[uniffi::export]
+pub fn run_calibration(
+    target_device_id: Option<String>,
+    address: Option<String>,
+    callback: Option<Box<dyn FfiCalibrationProgressCallback>>,
+) -> Result<FfiCalibrationResult, FfiTransferError> {
+    let rt = get_runtime();
+    let dev_id = target_device_id.and_then(|s| Uuid::parse_str(&s).ok());
+    let addr = address.as_deref();
+    let bridge: Option<Box<dyn crate::benchmark::CalibrationProgressCallback>> = callback.map(|cb| {
+        Box::new(FfiProgressBridge { callback: cb }) as Box<dyn crate::benchmark::CalibrationProgressCallback>
+    });
+
+    let res = rt
+        .block_on(async {
+            crate::benchmark::calibration::run_calibration(
+                dev_id,
+                addr,
+                bridge,
+            )
+            .await
+        })
+        .map_err(|e| FfiTransferError::Generic { msg: e.to_string() })?;
+
+    Ok(res.into())
+}
+
+#[uniffi::export]
+pub fn cancel_calibration(target_key: String) {
+    crate::benchmark::calibration::cancel_calibration(&target_key);
+}
+
+#[uniffi::export]
+pub fn get_saved_calibration(target_key: String) -> Option<FfiSavedCalibrationConfig> {
+    crate::benchmark::config_store::get_saved_calibration(&target_key).map(Into::into)
+}
+
+#[uniffi::export]
+pub fn clear_saved_calibration(target_key: String) {
+    let _ = crate::benchmark::config_store::clear_saved_calibration(&target_key);
 }

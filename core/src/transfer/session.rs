@@ -12,6 +12,7 @@ use super::tracker::{ChunkTracker, InMemoryChunkTracker};
 use crate::checksum::{compute_file_crc32c, compute_xxhash64};
 use crate::chunk::{calculate_chunk_plan, read_chunk_at};
 use crate::manifest::{generate_manifest_with_name, TransferRole, TransferStatus};
+use crate::benchmark::{TransferPurpose, WindowPreset};
 use crate::protocol::{
     encode_frame, ChunkAckData, ChunkDataPayload, ChunkNackData, CompleteData,
     HelloData, Message, ProtocolError, TransferAcceptData, TransferOfferData,
@@ -22,6 +23,12 @@ use crate::util::telemetry::{
     export_and_clean_telemetry, get_or_create_telemetry, EventLevel, TransferStage,
     TransferTelemetry,
 };
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SessionOptions {
+    pub purpose: TransferPurpose,
+    pub wifi_window_preset: Option<WindowPreset>,
+}
 
 #[derive(Error, Debug)]
 pub enum TransferSessionError {
@@ -167,9 +174,37 @@ pub async fn send_file_session<T>(
     file_path: &Path,
     chunk_size: u32,
     transfer_id: Uuid,
+    transport: T,
+    custom_file_name: Option<&str>,
+    is_usb_channel: Option<bool>,
+) -> Result<(), TransferSessionError>
+where
+    T: Transport,
+{
+    send_file_session_ext(
+        sender_device_id,
+        sender_device_name,
+        file_path,
+        chunk_size,
+        transfer_id,
+        transport,
+        custom_file_name,
+        is_usb_channel,
+        SessionOptions::default(),
+    )
+    .await
+}
+
+pub async fn send_file_session_ext<T>(
+    sender_device_id: Uuid,
+    sender_device_name: &str,
+    file_path: &Path,
+    chunk_size: u32,
+    transfer_id: Uuid,
     mut transport: T,
     custom_file_name: Option<&str>,
     is_usb_channel: Option<bool>,
+    options: SessionOptions,
 ) -> Result<(), TransferSessionError>
 where
     T: Transport,
@@ -232,6 +267,7 @@ where
         chunk_size: manifest.chunk_size,
         total_chunks: manifest.total_chunks,
         checksum_algo: "xxhash64".to_string(),
+        purpose: options.purpose,
     });
     transport.send_frame(&offer).await?;
 
@@ -747,8 +783,31 @@ pub async fn send_file_session_multipath(
     file_path: &Path,
     chunk_size: u32,
     transfer_id: Uuid,
+    transports: Vec<(Box<dyn Transport>, bool)>,
+    custom_file_name: Option<&str>,
+) -> Result<(), TransferSessionError> {
+    send_file_session_multipath_ext(
+        sender_device_id,
+        sender_device_name,
+        file_path,
+        chunk_size,
+        transfer_id,
+        transports,
+        custom_file_name,
+        SessionOptions::default(),
+    )
+    .await
+}
+
+pub async fn send_file_session_multipath_ext(
+    sender_device_id: Uuid,
+    sender_device_name: &str,
+    file_path: &Path,
+    chunk_size: u32,
+    transfer_id: Uuid,
     mut transports: Vec<(Box<dyn Transport>, bool)>,
     custom_file_name: Option<&str>,
+    options: SessionOptions,
 ) -> Result<(), TransferSessionError> {
     if transports.is_empty() {
         return Err(TransferSessionError::Transport(TransportError::Disconnected(
@@ -757,7 +816,7 @@ pub async fn send_file_session_multipath(
     }
     if transports.len() == 1 {
         let (transport, is_usb) = transports.pop().unwrap();
-        return send_file_session(
+        return send_file_session_ext(
             sender_device_id,
             sender_device_name,
             file_path,
@@ -766,6 +825,7 @@ pub async fn send_file_session_multipath(
             transport,
             custom_file_name,
             Some(is_usb),
+            options,
         )
         .await;
     }
@@ -821,6 +881,7 @@ pub async fn send_file_session_multipath(
                 chunk_size: manifest.chunk_size,
                 total_chunks: manifest.total_chunks,
                 checksum_algo: "xxhash64".to_string(),
+                purpose: options.purpose,
             });
             transport.send_frame(&offer).await?;
 
@@ -1080,10 +1141,18 @@ pub async fn send_file_session_multipath(
             format!("WiFi-Stream-{}", idx + 1)
         };
 
+        let wifi_window_preset = options.wifi_window_preset;
         let handle = tokio::spawn(async move {
             let mut tracker = ChannelTracker::new(channel_name.clone());
             let mut model = ChannelPerformanceModel::new(channel_name.clone(), if is_usb { 45.0 } else { 20.0 });
-            let mut window = if is_usb { WindowController::for_usb() } else { WindowController::for_wifi() };
+            let mut window = if is_usb {
+                WindowController::for_usb()
+            } else if let Some(preset) = wifi_window_preset {
+                let (min, max, init, bp, rtt) = preset.to_thresholds();
+                WindowController::with_thresholds(min, max, init, bp, rtt)
+            } else {
+                WindowController::for_wifi()
+            };
             let mut worker_in_flight_times = std::collections::HashMap::new();
             let mut last_socket_send_us: u64 = 1_000;
             let actor_handle = crate::transfer::api::get_transfer_actor_handle(transfer_id);

@@ -153,7 +153,185 @@ fun SettingsScreen(
             }
         }
 
-        // 4. Core Engine Information
+        // 4. Hardware Benchmark & Calibration
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        "Benchmark & Link Calibration",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Test raw network and storage throughput or run an automated 10-step parameter sweep to optimize link performance.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    OutlinedTextField(
+                        value = uiState.targetAddress,
+                        onValueChange = { viewModel.setTargetAddress(it) },
+                        label = { Text("Peer Address (Optional / Auto-detect)") },
+                        placeholder = { Text("e.g. 192.168.43.1:9876 or USB") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Button(
+                            onClick = { viewModel.runBenchmark() },
+                            enabled = !uiState.isBenchmarking && !uiState.isCalibrating,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            if (uiState.isBenchmarking) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text("Running...", fontSize = 12.sp)
+                            } else {
+                                Text("Benchmark", fontSize = 13.sp)
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                if (uiState.isCalibrating) {
+                                    viewModel.cancelCalibration()
+                                } else {
+                                    viewModel.runCalibration()
+                                }
+                            },
+                            enabled = !uiState.isBenchmarking,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = if (uiState.isCalibrating) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error) else ButtonDefaults.buttonColors()
+                        ) {
+                            if (uiState.isCalibrating) {
+                                Text("Cancel", fontSize = 13.sp)
+                            } else {
+                                Text("Calibrate", fontSize = 13.sp)
+                            }
+                        }
+                    }
+
+                    // Progress indicator for calibration
+                    if (uiState.isCalibrating && uiState.calibrationProgress != null) {
+                        val prog = uiState.calibrationProgress!!
+                        val progressFraction = prog.currentStep.toFloat() / prog.totalSteps.toFloat()
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            LinearProgressIndicator(
+                                progress = { progressFraction },
+                                modifier = Modifier.fillMaxWidth().height(6.dp),
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Step ${prog.currentStep}/${prog.totalSteps} (${prog.stage})", style = MaterialTheme.typography.labelSmall)
+                                prog.lastResultMbps?.let {
+                                    Text("Last: ${String.format("%.1f", it)} MB/s", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    // Benchmark Result Card
+                    uiState.benchmarkResult?.let { res ->
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text("Latest Benchmark Results", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Average Throughput:", style = MaterialTheme.typography.bodySmall)
+                                    Text("${String.format("%.1f", res.avgSpeedMbps)} MB/s", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Peak Throughput:", style = MaterialTheme.typography.bodySmall)
+                                    Text("${String.format("%.1f", res.peakSpeedMbps)} MB/s", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("USB / Wi-Fi Breakdown:", style = MaterialTheme.typography.bodySmall)
+                                    Text("${String.format("%.1f", res.usbAvgMbps)} / ${String.format("%.1f", res.wifiAvgMbps)} MB/s", style = MaterialTheme.typography.bodySmall)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Duration / Payload:", style = MaterialTheme.typography.bodySmall)
+                                    val payloadMb = res.bytesTransferred.toLong() / (1024L * 1024L)
+                                    Text("${res.durationMs} ms ($payloadMb MB)", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+
+                    // Saved Calibration Profile Card
+                    uiState.savedCalibration?.let { cal ->
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Active Calibrated Profile", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                    TextButton(
+                                        onClick = { viewModel.clearSavedCalibration() },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                    ) {
+                                        Text("Clear", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Wi-Fi Streams:", style = MaterialTheme.typography.bodySmall)
+                                    Text("${cal.config.wifiStreamCount ?: 3u}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Chunk Size:", style = MaterialTheme.typography.bodySmall)
+                                    val mb = (cal.config.chunkSizeBytes?.toLong() ?: (2L * 1024L * 1024L)) / (1024L * 1024L)
+                                    Text("$mb MiB", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Window Preset:", style = MaterialTheme.typography.bodySmall)
+                                    Text("${cal.config.wifiWindowPreset ?: "Balanced"}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Expected Speed:", style = MaterialTheme.typography.bodySmall)
+                                    Text("${String.format("%.1f", cal.expectedSpeedMbps)} MB/s", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Core Engine Information
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),

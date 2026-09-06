@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::benchmark::TransferPurpose;
 use super::error::ProtocolError;
 
 /// Message type code for `Hello` (0x01)
@@ -46,6 +47,7 @@ pub struct TransferOfferData {
     pub chunk_size: u32,
     pub total_chunks: u32,
     pub checksum_algo: String,
+    pub purpose: TransferPurpose,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,9 +170,33 @@ impl Message {
                 Message::Hello(data)
             }
             MSG_TYPE_TRANSFER_OFFER => {
-                let data: TransferOfferData = bincode::deserialize(payload)
-                    .map_err(|e| ProtocolError::DeserializationError(e.to_string()))?;
-                Message::TransferOffer(data)
+                match bincode::deserialize::<TransferOfferData>(payload) {
+                    Ok(data) => Message::TransferOffer(data),
+                    Err(_) => {
+                        #[derive(Deserialize)]
+                        struct LegacyTransferOfferData {
+                            transfer_id: Uuid,
+                            file_id: Uuid,
+                            file_name: String,
+                            file_size: u64,
+                            chunk_size: u32,
+                            total_chunks: u32,
+                            checksum_algo: String,
+                        }
+                        let legacy: LegacyTransferOfferData = bincode::deserialize(payload)
+                            .map_err(|e| ProtocolError::DeserializationError(e.to_string()))?;
+                        Message::TransferOffer(TransferOfferData {
+                            transfer_id: legacy.transfer_id,
+                            file_id: legacy.file_id,
+                            file_name: legacy.file_name,
+                            file_size: legacy.file_size,
+                            chunk_size: legacy.chunk_size,
+                            total_chunks: legacy.total_chunks,
+                            checksum_algo: legacy.checksum_algo,
+                            purpose: TransferPurpose::Normal,
+                        })
+                    }
+                }
             }
             MSG_TYPE_TRANSFER_ACCEPT => {
                 let data: TransferAcceptData = bincode::deserialize(payload)

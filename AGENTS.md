@@ -1,11 +1,12 @@
 # 🚨 MANDATORY AI INSTRUCTION: SNAPDRAGON 8 ELITE COMPILATION & TEST POLICY
 
-> **CRITICAL RULE FOR ALL AI MODELS / ASSISTANTS WORKING IN THIS REPOSITORY**
+> **CRITICAL RULES FOR ALL AI MODELS / ASSISTANTS WORKING IN THIS REPOSITORY**
 > 
-> **DO NOT** run heavy Rust compilation (`cargo build`, `cargo test --workspace`) or native Android cross-compilations (`--target aarch64-linux-android`) directly on the host laptop.
-> 
-> **ALWAYS** offload Rust compilation, test suites, benchmarks, and native core builds to the connected **Snapdragon 8 Elite** Android phone via the ADB bridge script (`tools/phone-builder.ps1`).
-
+> 1. **MANDATORY ANDROID DEPLOYMENT**: Each time changes are made to `core/` or `android/` files, ALWAYS deploy the Android app to the connected device via:
+>    `powershell -ExecutionPolicy Bypass -File .\tools\phone-builder.ps1 deploy`
+> 2. **DESKTOP TUI RELEASE BUILD**: Always compile `tui.exe` (`turbotransfer-tui`) in `target/release/` via:
+>    `cargo build --release -p turbotransfer-tui`
+> 3. **OFFLOAD RUST COMPILATION**: **DO NOT** run heavy workspace Rust test suites or cross-compilations directly on the host laptop. **ALWAYS** offload native core compilation and test suites to the connected **Snapdragon 8 Elite** Android phone via the ADB bridge script (`tools/phone-builder.ps1`).
 ---
 
 ## ⚡ Why This Rule Exists
@@ -46,14 +47,17 @@ powershell -ExecutionPolicy Bypass -File .\tools\phone-builder.ps1 test -Package
 
 ---
 
-### 3. Building Other Crates / Release Binaries
+### 3. Building Desktop TUI Release Binary (`target/release/tui.exe`)
+Whenever changes are made to core or TUI files, update the Windows desktop release binary:
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\phone-builder.ps1 build -Package <crate_name> -Release
+cargo build --release -p turbotransfer-tui
 ```
+*This produces `target\release\tui.exe`.*
 
 ---
 
-### 4. Android App Build, Install & Auto-Deploy (1-Step Pipeline)
+### 4. Mandatory Android App Build, Install & Auto-Deploy (1-Step Pipeline)
+**REQUIRED**: Run this command each time changes are made to `core/` or `android/` files:
 ```powershell
 # Compiles Rust on phone (2s), builds APK incrementally, installs via ADB, and auto-launches app
 powershell -ExecutionPolicy Bypass -File .\tools\phone-builder.ps1 deploy
