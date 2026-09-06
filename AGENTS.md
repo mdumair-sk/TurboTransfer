@@ -6,7 +6,8 @@
 >    `powershell -ExecutionPolicy Bypass -File .\tools\phone-builder.ps1 deploy`
 > 2. **DESKTOP TUI RELEASE BUILD**: Always compile `tui.exe` (`turbotransfer-tui`) in `target/release/` via:
 >    `cargo build --release -p turbotransfer-tui`
-> 3. **OFFLOAD RUST COMPILATION**: **DO NOT** run heavy workspace Rust test suites or cross-compilations directly on the host laptop. **ALWAYS** offload native core compilation and test suites to the connected **Snapdragon 8 Elite** Android phone via the ADB bridge script (`tools/phone-builder.ps1`).
+> 3. **PARALLEL TUI & ANDROID BUILD**: While deploying to Android via `phone-builder.ps1 deploy`, launch `cargo build --release -p turbotransfer-tui` concurrently in parallel to save time (phone builds Android core, PC builds desktop TUI).
+> 4. **OFFLOAD RUST COMPILATION**: **DO NOT** run heavy workspace Rust test suites or cross-compilations directly on the host laptop. **ALWAYS** offload native core compilation and test suites to the connected **Snapdragon 8 Elite** Android phone via the ADB bridge script (`tools/phone-builder.ps1`).
 ---
 
 ## ⚡ Why This Rule Exists
@@ -47,25 +48,24 @@ powershell -ExecutionPolicy Bypass -File .\tools\phone-builder.ps1 test -Package
 
 ---
 
-### 3. Building Desktop TUI Release Binary (`target/release/tui.exe`)
-Whenever changes are made to core or TUI files, update the Windows desktop release binary:
+### 3. Parallel Workflow: Android App Deploy & Desktop TUI Build
+Whenever modifying `core/` or both core and UI code, run Android deployment and desktop TUI release build **in parallel** to save round-trip time:
+
+1. **Terminal / Background Job 1 (Android Device via Phone Builder)**:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\phone-builder.ps1 deploy
+```
+*Builds `turbotransfer-core` natively on Snapdragon 8 Elite, updates `jniLibs` & Kotlin bindings, compiles APK, installs and starts app.*
+
+2. **Terminal / Background Job 2 (Windows PC Host Concurrently)**:
 ```powershell
 cargo build --release -p turbotransfer-tui
 ```
-*This produces `target\release\tui.exe`.*
+*Compiles `target\release\tui.exe` on desktop while phone compiles Android artifacts.*
 
 ---
 
-### 4. Mandatory Android App Build, Install & Auto-Deploy (1-Step Pipeline)
-**REQUIRED**: Run this command each time changes are made to `core/` or `android/` files:
-```powershell
-# Compiles Rust on phone (2s), builds APK incrementally, installs via ADB, and auto-launches app
-powershell -ExecutionPolicy Bypass -File .\tools\phone-builder.ps1 deploy
-```
-
----
-
-### 5. Node Diagnostics & Shell
+### 4. Node Diagnostics & Shell
 ```powershell
 # Check phone builder connectivity and toolchain
 powershell -ExecutionPolicy Bypass -File .\tools\phone-builder.ps1 status

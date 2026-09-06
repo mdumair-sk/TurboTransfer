@@ -360,6 +360,49 @@ fn get_windows_hotspot_probe_ips() -> Vec<String> {
             }
         }
     }
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    {
+        if let Ok(route_content) = std::fs::read_to_string("/proc/net/route") {
+            for line in route_content.lines().skip(1) {
+                let fields: Vec<&str> = line.split_whitespace().collect();
+                if fields.len() >= 3 {
+                    let dest_hex = fields[1];
+                    let gw_hex = fields[2];
+                    if let Ok(gw_val) = u32::from_str_radix(gw_hex, 16) {
+                        if gw_val != 0 {
+                            let b = gw_val.to_le_bytes();
+                            let addr = format!("{}.{}.{}.{}:9876", b[0], b[1], b[2], b[3]);
+                            if !ips.contains(&addr) {
+                                ips.push(addr);
+                            }
+                        }
+                    }
+                    if let Ok(dest_val) = u32::from_str_radix(dest_hex, 16) {
+                        if dest_val != 0 {
+                            let b = dest_val.to_le_bytes();
+                            let addr = format!("{}.{}.{}.1:9876", b[0], b[1], b[2]);
+                            if !ips.contains(&addr) {
+                                ips.push(addr);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let Ok(arp_content) = std::fs::read_to_string("/proc/net/arp") {
+            for line in arp_content.lines().skip(1) {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if let Some(ip) = parts.first() {
+                    if !ip.is_empty() && ip.contains('.') {
+                        let addr = format!("{}:9876", ip);
+                        if !ips.contains(&addr) {
+                            ips.push(addr);
+                        }
+                    }
+                }
+            }
+        }
+    }
     for static_ip in &[
         "10.18.163.1:9876",
         "10.18.163.2:9876",
@@ -448,22 +491,27 @@ pub async fn resolve_and_connect_transports_with_streams(
             }
         }
         TransportPreference::Combined => {
+            let mut usb_connected = false;
+            let mut wifi_connected = false;
+
             if let Some(explicit_addr) = address {
                 if explicit_addr.contains(',') {
                     for single_addr in explicit_addr.split(',') {
                         let trimmed = single_addr.trim();
                         if !trimmed.is_empty() {
                             let is_usb = trimmed.contains("127.0.0.1") || trimmed.contains("localhost") || trimmed.contains("usb");
-                            if is_usb {
+                            if is_usb && !usb_connected {
                                 if let Ok(t) = TcpTransport::connect(trimmed).await {
                                     transports.push((Box::new(t), true));
                                     transport_names.push("USB (ADB Tunnel)".to_string());
+                                    usb_connected = true;
                                 }
-                            } else {
+                            } else if !is_usb {
                                 for stream_idx in 1..=stream_count {
                                     if let Ok(t) = TcpTransport::connect(trimmed).await {
                                         transports.push((Box::new(t), false));
                                         transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
+                                        wifi_connected = true;
                                     }
                                 }
                             }
@@ -475,20 +523,22 @@ pub async fn resolve_and_connect_transports_with_streams(
                         if let Ok(t) = TcpTransport::connect(explicit_addr).await {
                             transports.push((Box::new(t), true));
                             transport_names.push("USB (ADB Tunnel)".to_string());
+                            usb_connected = true;
                         }
                     } else {
                         for stream_idx in 1..=stream_count {
                             if let Ok(t) = TcpTransport::connect(explicit_addr).await {
                                 transports.push((Box::new(t), false));
                                 transport_names.push(format!("5 GHz Wi-Fi Direct (Stream #{})", stream_idx));
+                                wifi_connected = true;
                             }
                         }
                     }
                 }
             }
 
-            if transports.is_empty() {
-                // 1. Connect USB channel
+            // 1. Connect USB channel if not already connected
+            if !usb_connected {
                 if let Ok(t) = TcpTransport::connect(DEFAULT_LOOPBACK_ADDR).await {
                     transports.push((Box::new(t), true));
                     transport_names.push("USB (ADB Tunnel)".to_string());
@@ -499,7 +549,10 @@ pub async fn resolve_and_connect_transports_with_streams(
                         transport_names.push("USB (ADB Tunnel)".to_string());
                     }
                 }
-                // 2. Connect Wi-Fi Direct channel with bonded sockets
+            }
+
+            // 2. Connect Wi-Fi Direct channel with bonded sockets if not already connected
+            if !wifi_connected {
                 let probe_ips = get_windows_hotspot_probe_ips();
                 for hotspot_ip in &probe_ips {
                     let mut connected_any = false;

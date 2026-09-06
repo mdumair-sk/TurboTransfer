@@ -178,8 +178,8 @@ fun SettingsScreen(
                     OutlinedTextField(
                         value = uiState.targetAddress,
                         onValueChange = { viewModel.setTargetAddress(it) },
-                        label = { Text("Peer Address (Optional / Auto-detect)") },
-                        placeholder = { Text("e.g. 192.168.43.1:9876 or USB") },
+                        label = { Text("Peer Address (Auto-detect Multipath)") },
+                        placeholder = { Text("e.g. 127.0.0.1:9876,10.188.197.1:9876") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp)

@@ -2,6 +2,7 @@ package com.turbotransfer.presentation.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.turbotransfer.domain.usecase.discovery.ObserveReceiverDiscoveryUseCase
 import com.turbotransfer.domain.usecase.settings.GetSettingsUseCase
 import com.turbotransfer.domain.usecase.settings.UpdateSettingsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -14,7 +15,8 @@ import uniffi.turbotransfer_core.*
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val getSettingsUseCase: GetSettingsUseCase,
-    private val updateSettingsUseCase: UpdateSettingsUseCase
+    private val updateSettingsUseCase: UpdateSettingsUseCase,
+    private val observeReceiverDiscoveryUseCase: ObserveReceiverDiscoveryUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -29,6 +31,20 @@ class SettingsViewModel @Inject constructor(
             )
         }
         loadSavedCalibration("")
+
+        viewModelScope.launch {
+            observeReceiverDiscoveryUseCase().collect { receiver ->
+                if (receiver != null) {
+                    _uiState.update { current ->
+                        if (current.targetAddress.isBlank() || current.targetAddress == "127.0.0.1:9876" || !current.targetAddress.contains(",")) {
+                            current.copy(targetAddress = receiver.address)
+                        } else {
+                            current
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fun setDeviceName(name: String) {
