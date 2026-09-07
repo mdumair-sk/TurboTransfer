@@ -270,34 +270,72 @@ pub fn handle_key_event(app: &mut AppState, key: KeyEvent) {
             _ => {}
         },
 
-        Screen::Benchmark => match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
-                if app.benchmark_transport_index == 0 {
-                    app.benchmark_transport_index = TRANSPORTS.len() - 1;
-                } else {
-                    app.benchmark_transport_index -= 1;
+        Screen::Benchmark => {
+            if app.input_mode == crate::app::InputMode::Editing {
+                match key.code {
+                    KeyCode::Enter | KeyCode::Esc => {
+                        app.input_mode = crate::app::InputMode::Normal;
+                    }
+                    KeyCode::Backspace => {
+                        app.peer_address_input.pop();
+                    }
+                    KeyCode::Char(c) => {
+                        app.peer_address_input.push(c);
+                    }
+                    _ => {}
+                }
+            } else {
+                match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if app.benchmark_transport_index == 0 {
+                            app.benchmark_transport_index = TRANSPORTS.len() - 1;
+                        } else {
+                            app.benchmark_transport_index -= 1;
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        app.benchmark_transport_index = (app.benchmark_transport_index + 1) % TRANSPORTS.len();
+                    }
+                    KeyCode::Char('s') | KeyCode::Char('S') => {
+                        let idx = BENCHMARK_SIZES
+                            .iter()
+                            .position(|&s| s == app.benchmark_size_mb)
+                            .unwrap_or(0);
+                        app.benchmark_size_mb = BENCHMARK_SIZES[(idx + 1) % BENCHMARK_SIZES.len()];
+                    }
+                    KeyCode::Char('p') | KeyCode::Char('P') => {
+                        app.input_mode = crate::app::InputMode::Editing;
+                    }
+                    KeyCode::Char('c') | KeyCode::Char('C') => {
+                        app.run_calibration_action();
+                    }
+                    KeyCode::Char('x') | KeyCode::Char('X') => {
+                        app.cancel_calibration_action();
+                    }
+                    KeyCode::Enter => {
+                        app.run_benchmark_action();
+                    }
+                    KeyCode::Esc => {
+                        if app.is_calibrating {
+                            app.cancel_calibration_action();
+                        } else {
+                            app.navigate_to(Screen::MainMenu);
+                        }
+                    }
+                    _ => {}
                 }
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                app.benchmark_transport_index = (app.benchmark_transport_index + 1) % TRANSPORTS.len();
-            }
-            KeyCode::Char('s') | KeyCode::Char('S') => {
-                let idx = BENCHMARK_SIZES
-                    .iter()
-                    .position(|&s| s == app.benchmark_size_mb)
-                    .unwrap_or(0);
-                app.benchmark_size_mb = BENCHMARK_SIZES[(idx + 1) % BENCHMARK_SIZES.len()];
-            }
-            KeyCode::Enter => {
-                app.run_benchmark_action();
-            }
-            KeyCode::Esc => app.navigate_to(Screen::MainMenu),
-            _ => {}
-        },
+        }
 
         Screen::BenchmarkResults => match key.code {
-            KeyCode::Esc => app.navigate_to(Screen::Benchmark),
-            KeyCode::Char('m') | KeyCode::Char('M') => app.navigate_to(Screen::MainMenu),
+            KeyCode::Esc => {
+                app.calibration_result = None;
+                app.navigate_to(Screen::Benchmark);
+            }
+            KeyCode::Char('m') | KeyCode::Char('M') | KeyCode::Enter => {
+                app.calibration_result = None;
+                app.navigate_to(Screen::MainMenu);
+            }
             _ => {}
         },
 

@@ -12,7 +12,6 @@ use crate::transfer::api::{
 use crate::transfer::session::{
     send_file_session_multipath_ext, SessionOptions, TransferSessionError,
 };
-use crate::util::telemetry::get_telemetry;
 
 /// Runs a single benchmark transfer of `size_mb` to the target peer.
 pub async fn run_benchmark_transfer(
@@ -88,6 +87,12 @@ pub async fn run_benchmark_transfer(
         transfer_id,
         slot: active_tx_slot.clone(),
     };
+    let telemetry = crate::util::telemetry::get_or_create_telemetry(
+        transfer_id,
+        "benchmark_payload.bin",
+        size_bytes,
+        crate::manifest::TransferRole::Sender,
+    );
     let t0 = Instant::now();
     let res = send_file_session_multipath_ext(
         Uuid::new_v4(),
@@ -107,25 +112,21 @@ pub async fn run_benchmark_transfer(
     res?;
 
     // Extract telemetry from transfer session
-    let (peak_mbps, usb_avg, wifi_avg) = if let Some(tel) = get_telemetry(transfer_id) {
-        let peak = tel.get_peak_throughput_mbps();
-        let channels = tel.get_channel_bytes_transferred();
-        let mut usb_bytes = 0u64;
-        let mut wifi_bytes = 0u64;
-        for (name, bytes) in channels.iter() {
-            if name.contains("USB") {
-                usb_bytes += bytes;
-            } else {
-                wifi_bytes += bytes;
-            }
+    let peak = telemetry.get_peak_throughput_mbps();
+    let channels = telemetry.get_channel_bytes_transferred();
+    let mut usb_bytes = 0u64;
+    let mut wifi_bytes = 0u64;
+    for (name, bytes) in channels.iter() {
+        if name.contains("USB") {
+            usb_bytes += bytes;
+        } else {
+            wifi_bytes += bytes;
         }
-        let dur_s = elapsed.as_secs_f64().max(0.001);
-        let usb_mbps = (usb_bytes as f64 / (1024.0 * 1024.0)) / dur_s;
-        let wifi_mbps = (wifi_bytes as f64 / (1024.0 * 1024.0)) / dur_s;
-        (peak, usb_mbps, wifi_mbps)
-    } else {
-        (0.0, 0.0, 0.0)
-    };
+    }
+    let dur_s = elapsed.as_secs_f64().max(0.001);
+    let usb_avg = (usb_bytes as f64 / (1024.0 * 1024.0)) / dur_s;
+    let wifi_avg = (wifi_bytes as f64 / (1024.0 * 1024.0)) / dur_s;
+    let peak_mbps = peak;
 
     let dur_s = elapsed.as_secs_f64().max(0.001);
     let avg_speed_mbps = (size_bytes as f64 / (1024.0 * 1024.0)) / dur_s;

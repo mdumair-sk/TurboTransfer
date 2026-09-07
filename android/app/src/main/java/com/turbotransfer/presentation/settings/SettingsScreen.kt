@@ -21,10 +21,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable
 fun SettingsScreen(
-    viewModel: SettingsViewModel = hiltViewModel()
+    viewModel: SettingsViewModel = hiltViewModel(),
+    onNavigateToTransfer: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    var showBenchmarkHelpDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.userMessage) {
         uiState.userMessage?.let { msg ->
@@ -164,11 +166,28 @@ fun SettingsScreen(
                     modifier = Modifier.padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(
-                        "Benchmark & Link Calibration",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Benchmark & Link Calibration",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        IconButton(
+                            onClick = { showBenchmarkHelpDialog = true },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Info,
+                                contentDescription = "Benchmark Guide",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
                     Text(
                         "Test raw network and storage throughput or run an automated 10-step parameter sweep to optimize link performance.",
                         style = MaterialTheme.typography.bodySmall,
@@ -190,7 +209,10 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Button(
-                            onClick = { viewModel.runBenchmark() },
+                            onClick = {
+                                viewModel.runBenchmark()
+                                onNavigateToTransfer()
+                            },
                             enabled = !uiState.isBenchmarking && !uiState.isCalibrating,
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp)
@@ -374,5 +396,52 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+    if (showBenchmarkHelpDialog) {
+        AlertDialog(
+            onDismissRequest = { showBenchmarkHelpDialog = false },
+            icon = { Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+            title = {
+                Text(
+                    "Benchmark & Calibration Guide",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "1. Trigger Receive Mode First",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        "Before starting a benchmark, the receiving device must be actively listening on port 9876:\n" +
+                        "• Desktop TUI: Press [2] on the main menu to enter Receive Files mode.\n" +
+                        "• Android Phone: Switch to the Receive tab and tap 'Start Receive Mode'.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        "2. Dual-Channel Multipath (USB + Wi-Fi)",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        "For combined multipath throughput, specify both comma-separated addresses in the Peer Address field:\n" +
+                        "e.g. 127.0.0.1:9876, 192.168.1.25:9876\n" +
+                        "• 127.0.0.1:9876 routes through ADB USB tunnel.\n" +
+                        "• The LAN IP routes over 5 GHz Wi-Fi Direct.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showBenchmarkHelpDialog = false }) {
+                    Text("Got it")
+                }
+            }
+        )
     }
 }

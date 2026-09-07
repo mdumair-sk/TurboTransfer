@@ -552,7 +552,10 @@ pub async fn resolve_and_connect_transports_with_streams(
             }
 
             // 2. Connect Wi-Fi Direct channel with bonded sockets if not already connected
-            if !wifi_connected {
+            let is_explicit_loopback = address
+                .map(|a| a.contains("127.0.0.1") || a.contains("localhost"))
+                .unwrap_or(false);
+            if !wifi_connected && !is_explicit_loopback {
                 let probe_ips = get_windows_hotspot_probe_ips();
                 for hotspot_ip in &probe_ips {
                     let mut connected_any = false;
@@ -1098,16 +1101,19 @@ async fn handle_incoming_receive_transport(
                 None,
             );
 
-            if !is_ephemeral {
-                register_active_transfer(
-                    offer.transfer_id,
-                    offer.file_name.clone(),
-                    offer.file_size,
-                    TransferRole::Receiver,
-                    offer.total_chunks,
-                    "Multi-Channel Ingestion".to_string(),
-                );
-            }
+            let transport_label = match offer.purpose {
+                crate::benchmark::TransferPurpose::Benchmark => "Benchmark (Receiving)".to_string(),
+                crate::benchmark::TransferPurpose::Calibration => "Calibration (Receiving)".to_string(),
+                crate::benchmark::TransferPurpose::Normal => "Multi-Channel Ingestion".to_string(),
+            };
+            register_active_transfer(
+                offer.transfer_id,
+                offer.file_name.clone(),
+                offer.file_size,
+                TransferRole::Receiver,
+                offer.total_chunks,
+                transport_label,
+            );
 
             let is_sender_in_same_process = {
                 let reg = get_registry();
@@ -1416,8 +1422,8 @@ async fn handle_incoming_receive_transport(
                         let _ = std::fs::remove_file(&session.file_path);
                     } else {
                         std::fs::rename(&session.part_path, &session.file_path)?;
-                        set_transfer_status(complete_data.transfer_id, TransferStatus::Completed, None);
                     }
+                    set_transfer_status(complete_data.transfer_id, TransferStatus::Completed, None);
 
                     let fin_ms = t_fin0.elapsed().as_millis() as u64;
                     session.telemetry.record_finalize(fin_ms, true);
@@ -1431,7 +1437,11 @@ async fn handle_incoming_receive_transport(
                         .unwrap()
                         .remove(&complete_data.transfer_id);
                     if session.is_ephemeral {
-                        get_registry().transfers.lock().unwrap().remove(&complete_data.transfer_id);
+                        let tid = complete_data.transfer_id;
+                        crate::util::runtime::spawn_task(async move {
+                            tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                            get_registry().transfers.lock().unwrap().remove(&tid);
+                        });
                     }
                 }
 

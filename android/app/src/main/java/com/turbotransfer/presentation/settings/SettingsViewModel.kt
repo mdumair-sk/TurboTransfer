@@ -37,7 +37,12 @@ class SettingsViewModel @Inject constructor(
                 if (receiver != null) {
                     _uiState.update { current ->
                         if (current.targetAddress.isBlank() || current.targetAddress == "127.0.0.1:9876" || !current.targetAddress.contains(",")) {
-                            current.copy(targetAddress = receiver.address)
+                            val combined = if (receiver.address != "127.0.0.1:9876" && !receiver.address.contains("127.0.0.1")) {
+                                "127.0.0.1:9876, ${receiver.address}"
+                            } else {
+                                receiver.address
+                            }
+                            current.copy(targetAddress = combined)
                         } else {
                             current
                         }

@@ -209,7 +209,7 @@ fun TurboTransferApp(
                     1 -> ReceiveScreen(onNavigateToTransfer = { viewModel.selectTab(2) })
                     2 -> TransferScreen()
                     3 -> HistoryScreen()
-                    4 -> SettingsScreen()
+                    4 -> SettingsScreen(onNavigateToTransfer = { viewModel.selectTab(2) })
                 }
             }
         }

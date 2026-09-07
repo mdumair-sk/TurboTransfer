@@ -253,3 +253,179 @@ fn benchmark_test_ephemeral_registry_lifecycle() {
     remove_active_transfer(transfer_id);
     assert_eq!(transfer_control_status(transfer_id), None);
 }
+
+#[tokio::test]
+async fn benchmark_test_e2e_loopback_run() {
+    let temp_dest = tempfile::tempdir().unwrap();
+    let addr = "127.0.0.1:9931";
+
+    let _receiver_handle = turbotransfer_core::transfer::api::enter_receive_mode(
+        Some(addr.to_string()),
+        temp_dest.path().to_path_buf(),
+    )
+    .await
+    .expect("Failed to start receiver on 127.0.0.1:9931");
+
+    let result = turbotransfer_core::transfer::api::run_benchmark_with_address(
+        None,
+        Some(addr),
+        turbotransfer_core::transfer::api::TransportPreference::Automatic,
+        5,
+    )
+    .await
+    .expect("Benchmark run failed");
+
+    assert!(result.throughput_mbps > 0.0, "Throughput must be > 0");
+    assert!(result.duration_ms > 0, "Duration must be > 0");
+    assert_eq!(
+        result.bytes_transferred,
+        5 * 1024 * 1024,
+        "Bytes transferred should be 5 MB"
+    );
+
+    // Stop receiver
+    turbotransfer_core::transfer::api::leave_receive_mode(Some(addr));
+
+    // Verify receiver destination directory has no leaked payload or part files
+    let remaining_files: Vec<_> = std::fs::read_dir(temp_dest.path())
+        .unwrap()
+        .flatten()
+        .collect();
+    assert!(
+        remaining_files.is_empty(),
+        "Receiver destination directory should have no leaked files upon completion"
+    );
+}
+
+#[tokio::test]
+async fn calibration_test_e2e_loopback_sweep() {
+    // Set 1 MB step size for fast execution in test environment
+    std::env::set_var("TURBOTRANSFER_CALIBRATION_STEP_MB", "1");
+
+    let temp_dest = tempfile::tempdir().unwrap();
+    let addr = "127.0.0.1:9932";
+
+    let _receiver_handle = turbotransfer_core::transfer::api::enter_receive_mode(
+        Some(addr.to_string()),
+        temp_dest.path().to_path_buf(),
+    )
+    .await
+    .expect("Failed to start receiver on 127.0.0.1:9932");
+
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+    use parking_lot::Mutex;
+
+    struct TestCallback {
+        steps_seen: Arc<AtomicU32>,
+        stages_seen: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl turbotransfer_core::benchmark::CalibrationProgressCallback for TestCallback {
+        fn on_progress(&self, update: turbotransfer_core::benchmark::CalibrationProgressUpdate) {
+            self.steps_seen.store(update.current_step, Ordering::SeqCst);
+            self.stages_seen.lock().push(update.stage);
+        }
+    }
+
+    let steps = Arc::new(AtomicU32::new(0));
+    let stages = Arc::new(Mutex::new(Vec::new()));
+
+    let callback = Box::new(TestCallback {
+        steps_seen: steps.clone(),
+        stages_seen: stages.clone(),
+    });
+
+    let res = turbotransfer_core::benchmark::run_calibration(
+        None,
+        Some(addr),
+        Some(callback),
+    )
+    .await
+    .expect("Calibration sweep failed");
+
+    assert_eq!(res.all_candidates.len(), 10, "Should have 10 candidate results");
+    assert_eq!(steps.load(Ordering::SeqCst), 10, "Should have observed step 10");
+
+    let recorded_stages = stages.lock().clone();
+    assert!(recorded_stages.contains(&"streams".to_string()));
+    assert!(recorded_stages.contains(&"chunk_size".to_string()));
+    assert!(recorded_stages.contains(&"window".to_string()));
+    assert!(recorded_stages.contains(&"confirmation".to_string()));
+
+    // Verify saved calibration
+    let pair_key = turbotransfer_core::benchmark::get_pair_key(addr);
+    let saved = turbotransfer_core::benchmark::get_saved_calibration(&pair_key)
+        .expect("Saved calibration should be retrievable");
+    assert_eq!(saved.device_pair_id, pair_key);
+    assert_eq!(saved.config, res.best_config);
+
+    // Verify cancellation halts execution cleanly
+    struct CancelCallback {
+        target: String,
+    }
+    impl turbotransfer_core::benchmark::CalibrationProgressCallback for CancelCallback {
+        fn on_progress(&self, update: turbotransfer_core::benchmark::CalibrationProgressUpdate) {
+            if update.current_step == 2 {
+                turbotransfer_core::benchmark::cancel_calibration(&self.target);
+            }
+        }
+    }
+
+    let cancel_cb = Box::new(CancelCallback {
+        target: addr.to_string(),
+    });
+    let cancel_res = turbotransfer_core::benchmark::run_calibration(
+        None,
+        Some(addr),
+        Some(cancel_cb),
+    )
+    .await;
+
+    assert!(
+        matches!(cancel_res, Err(turbotransfer_core::transfer::session::TransferSessionError::Cancelled)),
+        "Calibration should return Cancelled error"
+    );
+
+    // Clean up calibration config
+    let _ = turbotransfer_core::benchmark::clear_saved_calibration(&pair_key);
+
+    turbotransfer_core::transfer::api::leave_receive_mode(Some(addr));
+}
+
+#[tokio::test]
+#[ignore]
+async fn benchmark_test_physical_dual_channel_multipath() {
+    let dual_addr = std::env::var("TURBOTRANSFER_TEST_PEER_ADDR")
+        .unwrap_or_else(|_| "127.0.0.1:9876, 192.168.1.11:9876".to_string());
+    let size_mb = 50;
+
+    println!("==================================================");
+    println!("PHYSICAL DUAL-CHANNEL MULTIPATH BENCHMARK PUSH");
+    println!("Targets: USB (127.0.0.1:9876) + Wi-Fi (192.168.1.11:9876)");
+    println!("Payload: {} MB (52,428,800 bytes)", size_mb);
+    println!("Mode: Combined (Simultaneous Bonded Multi-Channel)");
+    println!("==================================================");
+
+    let result = turbotransfer_core::transfer::api::run_benchmark_with_address(
+        None,
+        Some(&dual_addr),
+        turbotransfer_core::transfer::api::TransportPreference::Combined,
+        size_mb,
+    )
+    .await
+    .expect("Dual-channel multipath benchmark failed");
+
+    println!("==================================================");
+    println!("DUAL-CHANNEL RESULTS OBSERVED:");
+    println!("Total Aggregate Speed : {:.2} MB/s ({:.2} Mbps)", result.throughput_mbps, result.throughput_mbps * 8.0);
+    println!("Peak Burst Speed      : {:.2} MB/s ({:.2} Mbps)", result.peak_speed_mbps, result.peak_speed_mbps * 8.0);
+    println!("USB Channel Average   : {:.2} MB/s", result.usb_avg_mbps);
+    println!("Wi-Fi Channel Average : {:.2} MB/s", result.wifi_avg_mbps);
+    println!("Bytes Transferred     : {}", result.bytes_transferred);
+    println!("Total Duration        : {} ms", result.duration_ms);
+    println!("==================================================");
+
+    assert!(result.throughput_mbps > 0.0);
+    assert_eq!(result.bytes_transferred, (size_mb as u64) * 1024 * 1024);
+}

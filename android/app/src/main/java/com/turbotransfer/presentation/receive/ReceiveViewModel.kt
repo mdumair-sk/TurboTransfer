@@ -57,16 +57,19 @@ class ReceiveViewModel @Inject constructor(
 
         // Network & USB probe loop
         viewModelScope.launch {
+            var previousUsb = false
             while (true) {
                 val (usb, ips) = getNetworkStatusUseCase()
+                val usbNewlyConnected = usb && !previousUsb
+                previousUsb = usb
                 _uiState.update { current ->
-                    val shouldAutoListen = usb && !current.isListening
                     current.copy(
                         usbAvailable = usb,
-                        detectedIps = ips,
-                        isListening = if (shouldAutoListen) true else current.isListening,
-                        statusText = if (shouldAutoListen) "Listening on 0.0.0.0:9876" else current.statusText
+                        detectedIps = ips
                     )
+                }
+                if (usbNewlyConnected && !_uiState.value.isListening) {
+                    toggleReceiveMode("0.0.0.0:9876")
                 }
                 delay(1500)
             }
@@ -107,7 +110,7 @@ class ReceiveViewModel @Inject constructor(
                         _uiState.update { it.copy(isListening = true, statusText = res.data) }
                     }
                     is Resource.Error -> {
-                        _uiState.update { it.copy(statusText = "Error: ${res.message}", userMessage = res.message) }
+                        _uiState.update { it.copy(isListening = false, statusText = "Error: ${res.message}", userMessage = res.message) }
                     }
                     is Resource.Loading -> {}
                 }

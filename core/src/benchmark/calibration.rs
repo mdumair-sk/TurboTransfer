@@ -38,6 +38,15 @@ pub async fn run_calibration(
     address: Option<&str>,
     callback: Option<Box<dyn CalibrationProgressCallback>>,
 ) -> Result<CalibrationResult, TransferSessionError> {
+    run_calibration_with_size(target_device_id, address, callback, None).await
+}
+
+pub async fn run_calibration_with_size(
+    target_device_id: Option<Uuid>,
+    address: Option<&str>,
+    callback: Option<Box<dyn CalibrationProgressCallback>>,
+    step_size_mb: Option<u32>,
+) -> Result<CalibrationResult, TransferSessionError> {
     let target_id = target_device_id.unwrap_or_else(Uuid::new_v4);
     let raw_key = match address.map(|s| s.trim()).filter(|s| !s.is_empty()) {
         Some(addr) => addr.to_string(),
@@ -62,6 +71,7 @@ pub async fn run_calibration(
         cancel_token.clone(),
         active_transfer_id.clone(),
         callback,
+        step_size_mb,
     )
     .await;
     {
@@ -79,7 +89,15 @@ async fn run_calibration_internal(
     cancel_token: Arc<AtomicBool>,
     active_transfer_id: Arc<Mutex<Option<Uuid>>>,
     callback: Option<Box<dyn CalibrationProgressCallback>>,
+    custom_size_mb: Option<u32>,
 ) -> Result<CalibrationResult, TransferSessionError> {
+    let step_size_mb = custom_size_mb
+        .or_else(|| {
+            std::env::var("TURBOTRANSFER_CALIBRATION_STEP_MB")
+                .ok()
+                .and_then(|v| v.parse().ok())
+        })
+        .unwrap_or(250);
     let total_steps = 10u32;
     let mut current_step = 0u32;
     let mut all_candidates = Vec::new();
@@ -115,12 +133,13 @@ async fn run_calibration_internal(
                 last_result_mbps: all_candidates.last().map(|c: &CalibrationCandidateResult| c.avg_speed_mbps),
             });
         }
+        check_cancel()?;
 
         let res = run_benchmark_transfer(
             Some(target_id),
             address,
             TransportPreference::Combined,
-            250,
+            step_size_mb,
             Some(&config),
             TransferPurpose::Calibration,
             Some(active_transfer_id.clone()),
@@ -165,12 +184,13 @@ async fn run_calibration_internal(
                 last_result_mbps: all_candidates.last().map(|c: &CalibrationCandidateResult| c.avg_speed_mbps),
             });
         }
+        check_cancel()?;
 
         let res = run_benchmark_transfer(
             Some(target_id),
             address,
             TransportPreference::Combined,
-            250,
+            step_size_mb,
             Some(&config),
             TransferPurpose::Calibration,
             Some(active_transfer_id.clone()),
@@ -218,12 +238,13 @@ async fn run_calibration_internal(
                 last_result_mbps: all_candidates.last().map(|c: &CalibrationCandidateResult| c.avg_speed_mbps),
             });
         }
+        check_cancel()?;
 
         let res = run_benchmark_transfer(
             Some(target_id),
             address,
             TransportPreference::Combined,
-            250,
+            step_size_mb,
             Some(&config),
             TransferPurpose::Calibration,
             Some(active_transfer_id.clone()),
@@ -263,12 +284,13 @@ async fn run_calibration_internal(
             last_result_mbps: all_candidates.last().map(|c: &CalibrationCandidateResult| c.avg_speed_mbps),
         });
     }
+    check_cancel()?;
 
     let confirmation_res = run_benchmark_transfer(
         Some(target_id),
         address,
         TransportPreference::Combined,
-        250,
+        step_size_mb,
         Some(&winning_config),
         TransferPurpose::Calibration,
         Some(active_transfer_id.clone()),

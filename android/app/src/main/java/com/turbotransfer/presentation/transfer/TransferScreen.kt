@@ -63,11 +63,14 @@ fun TransferScreen(
         // 1. Post-Transfer Completion Summary Card
         if (lastCompletedItem != null && (progress == null || progress.status != TransferStatus.IN_PROGRESS)) {
             val item = lastCompletedItem
+            val isBenchmark = item.fileName.contains("benchmark", ignoreCase = true) || item.fileName.contains("calibration", ignoreCase = true)
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isBenchmark) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
+                    )
                 ) {
                     Column(
                         modifier = Modifier.padding(20.dp),
@@ -79,16 +82,24 @@ fun TransferScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                                Icon(
+                                    if (isBenchmark) Icons.Default.Bolt else Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = if (isBenchmark) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
+                                )
                                 Text(
-                                    "Transfer Complete!",
+                                    if (isBenchmark) "⚡ Hardware Link Benchmark Complete!" else "Transfer Complete!",
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    color = if (isBenchmark) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
                                 )
                             }
                             IconButton(onClick = { viewModel.dismissCompleted() }, modifier = Modifier.size(24.dp)) {
-                                Icon(Icons.Default.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Close",
+                                    tint = if (isBenchmark) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
+                                )
                             }
                         }
 
@@ -96,7 +107,7 @@ fun TransferScreen(
                             item.fileName,
                             fontWeight = FontWeight.Bold,
                             style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            color = if (isBenchmark) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -105,11 +116,60 @@ fun TransferScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("Size: ${item.formattedSize}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
-                            Text("Avg Speed: ${String.format("%.1f MB/s", item.avgSpeedMBps)}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                            Text(
+                                "Payload: ${item.formattedSize}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (isBenchmark) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                            Text(
+                                "Avg Speed: ${String.format("%.1f MB/s", item.avgSpeedMBps)}",
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (isBenchmark) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
+                            )
                         }
 
-                        if (!item.isOutgoing && item.filePath.isNotBlank()) {
+                        if (isBenchmark) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Surface(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Text("USB Link", style = MaterialTheme.typography.labelSmall)
+                                        Text(String.format("%.1f MB/s", item.usbSpeedMBps), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                }
+                                Surface(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Text("5 GHz Wi-Fi", style = MaterialTheme.typography.labelSmall)
+                                        Text(String.format("%.1f MB/s", item.wifiSpeedMBps), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                AssistChip(
+                                    onClick = {},
+                                    label = { Text("Ephemeral Benchmark Payload (Auto-Cleaned)", fontSize = 11.sp) }
+                                )
+                                TextButton(onClick = { viewModel.dismissCompleted() }) {
+                                    Text("Dismiss")
+                                }
+                            }
+                        } else if (!item.isOutgoing && item.filePath.isNotBlank()) {
                             Spacer(modifier = Modifier.height(4.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -147,7 +207,7 @@ fun TransferScreen(
             val usbSpeedMBps = p.usbSpeedMBps
             val wifiSpeedMBps = p.wifiSpeedMBps
             val isOutgoing = activeSession?.isOutgoing ?: true
-
+            val isBenchmark = p.fileName.contains("benchmark", ignoreCase = true) || p.fileName.contains("calibration", ignoreCase = true)
             item {
                 ElevatedCard(
                     modifier = Modifier.fillMaxWidth(),
@@ -166,7 +226,11 @@ fun TransferScreen(
                         ) {
                             Surface(
                                 shape = RoundedCornerShape(10.dp),
-                                color = if (isOutgoing) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
+                                color = if (isBenchmark) {
+                                    if (isOutgoing) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
+                                } else {
+                                    if (isOutgoing) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
+                                }
                             ) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -174,12 +238,19 @@ fun TransferScreen(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Icon(
-                                        imageVector = if (isOutgoing) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
+                                        imageVector = if (isBenchmark) Icons.Default.Bolt else (if (isOutgoing) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward),
                                         contentDescription = null,
-                                        modifier = Modifier.size(14.dp)
+                                        modifier = Modifier.size(14.dp),
+                                        tint = if (isBenchmark) {
+                                            if (isOutgoing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
+                                        } else Color.Unspecified
                                     )
                                     Text(
-                                        if (isOutgoing) "SENDING TO PC" else "RECEIVING FROM PC",
+                                        if (isBenchmark) {
+                                            if (isOutgoing) "⚡ BENCHMARK PUSH TO PC" else "⚡ BENCHMARK INGESTION FROM PC"
+                                        } else {
+                                            if (isOutgoing) "SENDING TO PC" else "RECEIVING FROM PC"
+                                        },
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -217,7 +288,7 @@ fun TransferScreen(
                                 fontFamily = FontFamily.Monospace
                             )
                             Text(
-                                "MB/s (Combined Throughput)",
+                                if (isBenchmark) "MB/s (Multipath Saturation Throughput)" else "MB/s (Combined Throughput)",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -264,9 +335,21 @@ fun TransferScreen(
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh
                             ) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .background(
+                                                    if (usbSpeedMBps > 0.05) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outlineVariant,
+                                                    CircleShape
+                                                )
+                                        )
                                         Icon(Icons.Default.Usb, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                                        Text("USB Link", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            if (isBenchmark) "USB (ADB Tunnel)" else "USB Link",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
                                     Text(
                                         String.format("%.1f MB/s", usbSpeedMBps),
@@ -283,9 +366,21 @@ fun TransferScreen(
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh
                             ) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .background(
+                                                    if (wifiSpeedMBps > 0.05) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outlineVariant,
+                                                    CircleShape
+                                                )
+                                        )
                                         Icon(Icons.Default.Wifi, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.secondary)
-                                        Text("5 GHz Wi-Fi", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            if (isBenchmark) "Wi-Fi (5 GHz Direct)" else "5 GHz Wi-Fi",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
                                     Text(
                                         String.format("%.1f MB/s", wifiSpeedMBps),

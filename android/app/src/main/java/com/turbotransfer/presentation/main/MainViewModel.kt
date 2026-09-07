@@ -15,9 +15,12 @@ import com.turbotransfer.domain.usecase.transfer.StartTransferUseCase
 import com.turbotransfer.domain.usecase.transfer.StopReceiveModeUseCase
 import com.turbotransfer.domain.usecase.settings.GetSettingsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import android.util.Log
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import uniffi.turbotransfer_core.*
 import javax.inject.Inject
 
 @HiltViewModel
@@ -58,14 +61,21 @@ class MainViewModel @Inject constructor(
         // Background detector for incoming external transfers
         viewModelScope.launch {
             while (true) {
-                if (activeSession.value == null) {
+                val currentStatus = _currentProgress.value?.status
+                val isIdleOrDone = activeSession.value == null ||
+                        currentStatus == TransferStatus.COMPLETED ||
+                        currentStatus == TransferStatus.FAILED ||
+                        currentStatus == TransferStatus.CANCELLED
+
+                if (isIdleOrDone) {
+                    val prevSessionId = activeSession.value?.transferId
                     val saveDir = getSettingsUseCase.getReceiveDestDir()
                     val incoming = pollIncomingTransferUseCase(saveDir)
-                    if (incoming != null) {
+                    if (incoming != null && incoming.transferId != prevSessionId) {
                         _selectedTab.value = 2 // Auto-switch to transfer dashboard
                     }
                 }
-                delay(400)
+                delay(250)
             }
         }
     }
@@ -100,6 +110,22 @@ class MainViewModel @Inject constructor(
     fun handleStopReceiveBroadcast() {
         viewModelScope.launch {
             stopReceiveModeUseCase()
+        }
+    }
+
+    fun handleRunBenchmarkBroadcast(address: String, sizeMb: UInt) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _selectedTab.value = 2
+            try {
+                runBenchmark(
+                    targetDeviceId = null,
+                    address = address,
+                    transportPref = FfiTransportPreference.COMBINED,
+                    sizeMb = sizeMb
+                )
+            } catch (e: Exception) {
+                Log.e("TurboTransfer", "Benchmark error: ${e.message}", e)
+            }
         }
     }
 }

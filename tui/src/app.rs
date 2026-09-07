@@ -1,5 +1,8 @@
 use std::path::PathBuf;
 use turbotransfer_core::manifest::TransferStatus;
+use turbotransfer_core::benchmark::{
+    CalibrationProgressCallback, CalibrationProgressUpdate, CalibrationResult,
+};
 use turbotransfer_core::transfer::{
     cancel_transfer, enter_receive_mode, get_devices, get_progress, get_transfers,
     leave_receive_mode, pause_transfer, resume_transfer, start_transfer, BenchmarkResult,
@@ -198,6 +201,12 @@ pub struct AppState {
     pub benchmark_result: Option<BenchmarkResult>,
     pub is_benchmarking: bool,
     pub benchmark_rx: Option<tokio::sync::mpsc::UnboundedReceiver<Result<BenchmarkResult, String>>>,
+    pub is_calibrating: bool,
+    pub calibration_progress: Option<CalibrationProgressUpdate>,
+    pub calibration_result: Option<CalibrationResult>,
+    pub calibration_rx: Option<tokio::sync::mpsc::UnboundedReceiver<Result<CalibrationResult, String>>>,
+    pub calibration_prog_rx: Option<tokio::sync::mpsc::UnboundedReceiver<CalibrationProgressUpdate>>,
+    pub peer_address_input: String,
 }
 
 impl Default for AppState {
@@ -243,6 +252,12 @@ impl AppState {
             benchmark_result: None,
             is_benchmarking: false,
             benchmark_rx: None,
+            is_calibrating: false,
+            calibration_progress: None,
+            calibration_result: None,
+            calibration_rx: None,
+            calibration_prog_rx: None,
+            peer_address_input: String::new(),
         };
 
         app.refresh_browser_entries();
@@ -397,7 +412,7 @@ impl AppState {
     pub fn poll_active_progress(&mut self) {
         if self.current_screen == Screen::Transfers || self.current_screen == Screen::Resume {
             self.refresh_transfers();
-        } else if self.is_receiving || self.current_screen == Screen::TransferScreen {
+        } else {
             self.refresh_transfers();
             let in_progress_id = self.cached_transfers.iter().find(|t| t.status == TransferStatus::InProgress).map(|t| t.transfer_id);
 
@@ -408,9 +423,11 @@ impl AppState {
 
                 if self.active_transfer_id != Some(in_prog) && (current_is_done || self.active_transfer_id.is_none()) {
                     self.active_transfer_id = Some(in_prog);
-                    if self.current_screen == Screen::ReceiveFiles {
+                    if self.current_screen != Screen::TransferScreen && self.current_screen != Screen::TransferDetails {
                         self.navigate_to(Screen::TransferScreen);
                     }
+                } else if self.current_screen == Screen::ReceiveFiles {
+                    self.navigate_to(Screen::TransferScreen);
                 }
             }
         }
@@ -448,6 +465,39 @@ impl AppState {
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
                     self.is_benchmarking = false;
+                }
+            }
+        }
+
+        if let Some(mut prog_rx) = self.calibration_prog_rx.take() {
+            while let Ok(update) = prog_rx.try_recv() {
+                self.calibration_progress = Some(update);
+            }
+            self.calibration_prog_rx = Some(prog_rx);
+        }
+
+        if let Some(mut rx) = self.calibration_rx.take() {
+            match rx.try_recv() {
+                Ok(res) => {
+                    self.is_calibrating = false;
+                    self.calibration_prog_rx = None;
+                    match res {
+                        Ok(cal) => {
+                            self.calibration_result = Some(cal);
+                            self.status_message = Some("Calibration sweep completed successfully".to_string());
+                            self.navigate_to(Screen::BenchmarkResults);
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Calibration stopped/failed: {}", e));
+                        }
+                    }
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                    self.calibration_rx = Some(rx);
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    self.is_calibrating = false;
+                    self.calibration_prog_rx = None;
                 }
             }
         }
@@ -490,9 +540,9 @@ impl AppState {
         }
     }
 
-    /// Executes benchmark via Transfer API `run_benchmark` (§7, §13).
+    /// Executes benchmark via Transfer API `run_benchmark_with_address` (§7, §13).
     pub fn run_benchmark_action(&mut self) {
-        if self.is_benchmarking {
+        if self.is_benchmarking || self.is_calibrating {
             return;
         }
         self.is_benchmarking = true;
@@ -505,14 +555,75 @@ impl AppState {
             _ => TransportPreference::Automatic,
         };
         let size = self.benchmark_size_mb;
+        let peer_addr = if self.peer_address_input.trim().is_empty() {
+            None
+        } else {
+            Some(self.peer_address_input.trim().to_string())
+        };
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         self.benchmark_rx = Some(rx);
 
         tokio::spawn(async move {
-            let res = turbotransfer_core::transfer::api::run_benchmark(None, pref, size).await;
+            let res = turbotransfer_core::transfer::api::run_benchmark_with_address(
+                None,
+                peer_addr.as_deref(),
+                pref,
+                size,
+            )
+            .await;
             let _ = tx.send(res.map_err(|e| e.to_string()));
         });
+
+        self.navigate_to(Screen::TransferScreen);
+    }
+
+    /// Executes link calibration sweep via `turbotransfer_core::benchmark::run_calibration`.
+    pub fn run_calibration_action(&mut self) {
+        if self.is_calibrating || self.is_benchmarking {
+            return;
+        }
+        self.is_calibrating = true;
+        self.calibration_progress = None;
+        self.status_message = Some("Starting link calibration sweep (10 steps)...".to_string());
+
+        let peer_addr = if self.peer_address_input.trim().is_empty() {
+            None
+        } else {
+            Some(self.peer_address_input.trim().to_string())
+        };
+
+        let (res_tx, res_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (prog_tx, prog_rx) = tokio::sync::mpsc::unbounded_channel();
+        self.calibration_rx = Some(res_rx);
+        self.calibration_prog_rx = Some(prog_rx);
+
+        struct TuiCalibrationCallback {
+            tx: tokio::sync::mpsc::UnboundedSender<CalibrationProgressUpdate>,
+        }
+
+        impl CalibrationProgressCallback for TuiCalibrationCallback {
+            fn on_progress(&self, update: CalibrationProgressUpdate) {
+                let _ = self.tx.send(update);
+            }
+        }
+
+        tokio::spawn(async move {
+            let callback = Box::new(TuiCalibrationCallback { tx: prog_tx });
+            let addr_ref = peer_addr.as_deref();
+            let res = turbotransfer_core::benchmark::run_calibration(None, addr_ref, Some(callback)).await;
+            let _ = res_tx.send(res.map_err(|e| e.to_string()));
+        });
+    }
+
+    /// Cancels active calibration sweep.
+    pub fn cancel_calibration_action(&mut self) {
+        if self.is_calibrating {
+            let addr = self.peer_address_input.trim();
+            turbotransfer_core::benchmark::cancel_calibration(addr);
+            self.is_calibrating = false;
+            self.status_message = Some("Cancelling calibration...".to_string());
+        }
     }
 
     /// Moves selection down in the current list/menu.

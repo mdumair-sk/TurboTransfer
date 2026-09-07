@@ -52,6 +52,12 @@ class MainActivity : ComponentActivity() {
                     Log.d("TurboTransfer", "Broadcast received: STOP_RECEIVE")
                     mainViewModel.handleStopReceiveBroadcast()
                 }
+                "com.turbotransfer.RUN_BENCHMARK" -> {
+                    val address = intent.getStringExtra("address") ?: "127.0.0.1:9876"
+                    val sizeMb = (intent.getIntExtra("size_mb", 100)).toUInt()
+                    Log.d("TurboTransfer", "Broadcast received: RUN_BENCHMARK address=$address, size=$sizeMb")
+                    mainViewModel.handleRunBenchmarkBroadcast(address, sizeMb)
+                }
             }
         }
     }
@@ -74,6 +80,7 @@ class MainActivity : ComponentActivity() {
             addAction("com.turbotransfer.STOP_HOTSPOT")
             addAction("com.turbotransfer.ENTER_RECEIVE")
             addAction("com.turbotransfer.STOP_RECEIVE")
+            addAction("com.turbotransfer.RUN_BENCHMARK")
         }
         ContextCompat.registerReceiver(
             this,

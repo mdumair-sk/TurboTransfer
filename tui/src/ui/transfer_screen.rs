@@ -27,14 +27,19 @@ pub fn render_transfer_screen(f: &mut Frame, app: &AppState, area: Rect) {
 
     let is_completed = app.active_progress.as_ref().map(|p| p.status) == Some(TransferStatus::Completed);
     let is_failed = app.active_progress.as_ref().map(|p| p.status) == Some(TransferStatus::Failed);
+    let is_benchmark = file_name.to_lowercase().contains("benchmark") || file_name.to_lowercase().contains("calibration");
 
-    let status_str = match app.active_progress.as_ref().map(|p| p.status) {
-        Some(TransferStatus::Completed) => "COMPLETED (100%)",
-        Some(TransferStatus::Failed) => "FAILED",
-        Some(TransferStatus::Paused) => "PAUSED",
-        Some(TransferStatus::Cancelled) => "CANCELLED",
-        Some(TransferStatus::InProgress) => "TRANSFERRING",
-        None => "CONNECTING / STANDBY",
+    let status_str = if is_benchmark && app.active_progress.as_ref().map(|p| p.status) == Some(TransferStatus::InProgress) {
+        "MULTIPATH ACTIVE"
+    } else {
+        match app.active_progress.as_ref().map(|p| p.status) {
+            Some(TransferStatus::Completed) => "COMPLETED (100%)",
+            Some(TransferStatus::Failed) => "FAILED",
+            Some(TransferStatus::Paused) => "PAUSED",
+            Some(TransferStatus::Cancelled) => "CANCELLED",
+            Some(TransferStatus::InProgress) => "TRANSFERRING",
+            None => "CONNECTING / STANDBY",
+        }
     };
 
     let status_color = match app.active_progress.as_ref().map(|p| p.status) {
@@ -46,8 +51,14 @@ pub fn render_transfer_screen(f: &mut Frame, app: &AppState, area: Rect) {
         None => Color::White,
     };
 
+    let title_str = if is_benchmark {
+        " LIVE BENCHMARK MONITOR "
+    } else {
+        " LIVE TRANSFER MONITOR "
+    };
+
     let header_text = Line::from(vec![
-        Span::styled(" LIVE TRANSFER MONITOR ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled(title_str, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
         Span::styled("│ ", Style::default().fg(Color::DarkGray)),
         Span::styled(file_name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
         Span::styled("  [", Style::default().fg(Color::DarkGray)),
@@ -118,9 +129,15 @@ pub fn render_transfer_screen(f: &mut Frame, app: &AppState, area: Rect) {
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::DarkGray))
         .title(if is_completed {
-            " Transfer Summary & Verified Output "
+            if is_benchmark {
+                " Benchmark Saturation Summary "
+            } else {
+                " Transfer Summary & Verified Output "
+            }
         } else if is_failed {
             " Transfer Diagnostics & Error "
+        } else if is_benchmark {
+            " Multipath Benchmark Telemetry "
         } else {
             " Multipath Telemetry & Throughput "
         });
@@ -129,11 +146,18 @@ pub fn render_transfer_screen(f: &mut Frame, app: &AppState, area: Rect) {
         vec![
             Line::from(""),
             Line::from(vec![
-                Span::styled("   ✔ File transfer finished and verified cleanly!", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    if is_benchmark {
+                        "   ✔ Benchmark transfer finished and link saturation verified!"
+                    } else {
+                        "   ✔ File transfer finished and verified cleanly!"
+                    },
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                ),
             ]),
             Line::from(""),
             Line::from(vec![
-                Span::styled("   Average Speed:   ", Style::default().fg(Color::DarkGray)),
+                Span::styled(if is_benchmark { "   Saturation Speed:" } else { "   Average Speed:   " }, Style::default().fg(Color::DarkGray)),
                 Span::styled(format!("{:.2} MB/s", total_mbps), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
                 Span::styled("  │  Total Transferred: ", Style::default().fg(Color::DarkGray)),
                 Span::styled(format!("{:.2} MB", total_bytes as f64 / (1024.0 * 1024.0)), Style::default().fg(Color::White)),
@@ -173,7 +197,7 @@ pub fn render_transfer_screen(f: &mut Frame, app: &AppState, area: Rect) {
         vec![
             Line::from(""),
             Line::from(vec![
-                Span::styled("   Throughput:      ", Style::default().fg(Color::DarkGray)),
+                Span::styled(if is_benchmark { "   Throughput (Sat):" } else { "   Throughput:      " }, Style::default().fg(Color::DarkGray)),
                 Span::styled(format!("{:.2} MB/s", total_mbps), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
                 Span::styled(format!("  (ETA: {})", eta_str), Style::default().fg(Color::White)),
             ]),

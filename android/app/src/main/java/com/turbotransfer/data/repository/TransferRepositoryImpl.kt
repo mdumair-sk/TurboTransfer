@@ -178,20 +178,25 @@ class TransferRepositoryImpl @Inject constructor(
         }
 
         return if (activeTransfer != null) {
-            val resolvedPath = File(saveDir, activeTransfer.fileName).absolutePath
-            val isOut = (activeTransfer.role == FfiTransferRole.SENDER)
-            val session = TransferSession(
-                transferId = activeTransfer.transferId,
-                fileName = activeTransfer.fileName,
-                fileSize = activeTransfer.fileSize.toLong(),
-                formattedSize = UriUtils.formatFileSize(activeTransfer.fileSize.toLong()),
-                filePath = resolvedPath,
-                isOutgoing = isOut,
-                startTimeMs = System.currentTimeMillis()
-            )
-            _activeSessionFlow.value = session
-            TransferService.start(context, activeTransfer.transferId)
-            session
+            val current = _activeSessionFlow.value
+            if (current == null || current.transferId != activeTransfer.transferId) {
+                val resolvedPath = File(saveDir, activeTransfer.fileName).absolutePath
+                val isOut = (activeTransfer.role == FfiTransferRole.SENDER)
+                val session = TransferSession(
+                    transferId = activeTransfer.transferId,
+                    fileName = activeTransfer.fileName,
+                    fileSize = activeTransfer.fileSize.toLong(),
+                    formattedSize = UriUtils.formatFileSize(activeTransfer.fileSize.toLong()),
+                    filePath = resolvedPath,
+                    isOutgoing = isOut,
+                    startTimeMs = System.currentTimeMillis()
+                )
+                _activeSessionFlow.value = session
+                TransferService.start(context, activeTransfer.transferId)
+                session
+            } else {
+                current
+            }
         } else {
             null
         }
