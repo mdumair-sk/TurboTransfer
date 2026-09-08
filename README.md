@@ -1,9 +1,11 @@
-# 🚀 TurboTransfer
+# <img src="docs/icons/bolt.svg" width="28" height="28" alt="" valign="middle" /> TurboTransfer
 
 <div align="center">
 
-**Ultra-High-Speed Multipath File Transfer Engine between Android & Windows**  
-*Simultaneous USB (ADB Reverse Tunnel) + 5 GHz Wi-Fi Direct / Local Hotspot Transmission*
+### Stop waiting on MTP. Stop uploading gigabytes to the cloud.  
+**Saturate the wire. Bond physical USB + 5 GHz Wi-Fi simultaneously.**
+
+*The high-octane, multipath file transfer engine forged in Rust for Windows & Android.*
 
 [![Rust](https://img.shields.io/badge/Rust-2021_Edition-orange?logo=rust)](https://www.rust-lang.org/)
 [![Android](https://img.shields.io/badge/Android-API_26+-green?logo=android)](https://developer.android.com/)
@@ -18,15 +20,39 @@
 
 ---
 
-## 📖 Overview
+> ### "Why choose between the cable and the air when you have both?"
+> Moving files between Windows and Android has been miserable for two decades:
+> - **MTP (Media Transfer Protocol)** is an unstable relic. It locks Windows Explorer, crawls on directories, and dies on a 40 GB 8K video with zero resume capability.
+> - **Bluetooth** crawls at 1.5 MB/s and drops frames.
+> - **Cloud Storage (Drive / OneDrive / Dropbox)** burns home bandwidth uploading private footage to Big Tech data centers only to download it back across your desk.
+> - **Quick Share / Nearby Share** depends on fickle Google Play Services handshakes, flaky mDNS discovery, and random drops.
+> - **AirDrop** is locked inside Apple's walled garden.
+>
+> **TurboTransfer ends the compromise.** Plug in the USB cable, spin up direct 5 GHz Wi-Fi, and watch both pipes dump bits concurrently at physical wire speed. Zero external router, zero internet, zero cloud, zero corporate telemetry. Built for humans moving massive payloads: 8K ProRes shoots, 100 GB game backups, RAW camera dumps, VM images, and LLM model weights.
 
-**TurboTransfer** is an enterprise-grade, cross-platform file transfer system engineered specifically for massive payloads (4K/8K ProRes video, RAW photo libraries, disk images, game backups, and virtual machine snapshots) between Windows PCs and Android devices.
+---
 
-Unlike traditional transfer tools (MTP, Bluetooth, or single-channel HTTP/SMB servers) that are throttled by single-link bottlenecks and protocol overhead, TurboTransfer **bonds physical USB and high-speed 5 GHz Wi-Fi links into a unified multipath stream**. It pairs a stateful control plane with a stateless data plane of independently verifiable chunks, delivering maximum aggregate throughput, automated link calibration, instant cold-resume recovery, and zero external router or internet dependencies.
+## The Field: How TurboTransfer Compares
 
+| Capability | MTP (Explorer) | Cloud (Drive / OneDrive) | Quick Share / Nearby | LocalSend | **TurboTransfer** |
+|---|---|---|---|---|---|
+| **Dual-Channel Bonding** | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> None | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> None | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> None | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> None | <img src="docs/icons/check.svg" width="13" height="13" alt="yes" /> **USB + Wi-Fi Multipath** |
+| **Multi-Stream TCP** | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> No | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> Single socket | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> No | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> Single HTTP stream | <img src="docs/icons/check.svg" width="13" height="13" alt="yes" /> **3–4x Bonded Streams** |
+| **Crash Recovery** | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> Restarts at 0% | <img src="docs/icons/alert.svg" width="13" height="13" alt="partial" /> Chunk retry | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> Fail & restart | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> Fail & restart | <img src="docs/icons/check.svg" width="13" height="13" alt="yes" /> **Instant Bitset Cold Resume** |
+| **Air-Gapped / Offline**| <img src="docs/icons/check.svg" width="13" height="13" alt="yes" /> Yes | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> Needs internet | <img src="docs/icons/alert.svg" width="13" height="13" alt="partial" /> Needs Google Play | <img src="docs/icons/check.svg" width="13" height="13" alt="yes" /> Local LAN | <img src="docs/icons/check.svg" width="13" height="13" alt="yes" /> **100% Zero-Router SoftAP** |
+| **In-Flight Integrity** | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> Blind stream | <img src="docs/icons/alert.svg" width="13" height="13" alt="partial" /> Server check | <img src="docs/icons/alert.svg" width="13" height="13" alt="partial" /> Opaque | <img src="docs/icons/alert.svg" width="13" height="13" alt="partial" /> Post-transfer SHA | <img src="docs/icons/check.svg" width="13" height="13" alt="yes" /> **xxHash64 + O(1) GF(2) CRC32c** |
+| **Congestion Control** | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> OS freeze | <img src="docs/icons/alert.svg" width="13" height="13" alt="partial" /> TCP default | <img src="docs/icons/alert.svg" width="13" height="13" alt="partial" /> Basic | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> None | <img src="docs/icons/check.svg" width="13" height="13" alt="yes" /> **Dynamic AIMD Windowing** |
+| **Terminal / CLI Power**| <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> GUI only | <img src="docs/icons/alert.svg" width="13" height="13" alt="partial" /> Sync client | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> App only | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> GUI only | <img src="docs/icons/check.svg" width="13" height="13" alt="yes" /> **15-Screen TUI + `turbo` CLI** |
+| **Telemetry / Diagnosis**| <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> Error dialog | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> None | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> None | <img src="docs/icons/x.svg" width="13" height="13" alt="no" /> None | <img src="docs/icons/check.svg" width="13" height="13" alt="yes" /> **Microsecond Bottleneck Engine** |
+
+---
+
+## <img src="docs/icons/layers.svg" width="18" height="18" alt="" valign="middle" /> How It Works
+
+TurboTransfer **bonds physical USB and high-speed 5 GHz Wi-Fi links into a unified multipath stream**. It pairs a stateful control plane with a stateless data plane of independently verifiable chunks, delivering maximum aggregate throughput, automated link calibration, instant cold-resume recovery, and zero external router or internet dependencies.
 ```mermaid
 graph TD
-    subgraph Windows ["🖥️ Windows 10 / 11 Host"]
+    subgraph Windows ["Windows 10 / 11 Host"]
         TUI["Ratatui TUI (`tui.exe`)"]
         CLI["CLI Tool (`turbo.exe`)"]
         API["Transfer API & Benchmark Engine"]
@@ -35,7 +61,7 @@ graph TD
         WIFI_W["Multi-Stream Wi-Fi (3-4x Bonded TCP Sockets)"]
     end
 
-    subgraph Android ["📱 Android Companion App (Kotlin + Compose)"]
+    subgraph Android ["Android Companion App (Kotlin + Compose)"]
         SVC["Background TransferService (WakeLock/WiFiLock)"]
         USB_A["USB Localhost Listener (TCP :9876)"]
         WIFI_A["5 GHz Local Hotspot / Wi-Fi Direct"]
@@ -64,7 +90,7 @@ graph TD
 
 ---
 
-## ⚡ Key Architectural Highlights
+## <img src="docs/icons/cpu.svg" width="18" height="18" alt="" valign="middle" /> Key Architectural Highlights
 
 * **Multipath Bandwidth Aggregation & Multi-Stream Bonding**: Concurrently streams chunks across USB ADB tunnels and 5 GHz Wi-Fi channels. Wi-Fi links bond **3–4 parallel TCP streams** by default to saturate 802.11ac bandwidth without per-connection head-of-line blocking.
 * **Dynamic AIMD Concurrency Window & Congestion Control**: Channels are governed by an Additive Increase / Multiplicative Decrease (AIMD) window controller (`WindowController`). Adapts in-flight concurrency windows (USB: 12–48 chunks, Wi-Fi: 16–48 chunks) in response to socket write backpressure and RTT congestion signals.
@@ -83,7 +109,7 @@ graph TD
 * **Snapdragon 8 Elite Native Build Offload**: Integrated developer tooling (`tools/phone-builder.ps1`) that offloads core Rust compilation and full test suites over ADB to Snapdragon 8 Elite Oryon cores in 0.2–2.5s (25x faster than host laptop).
 ---
 
-## 📂 Project Architecture
+## <img src="docs/icons/layers.svg" width="18" height="18" alt="" valign="middle" /> Project Architecture
 
 ```
 TurboTransfer/
@@ -180,7 +206,7 @@ TurboTransfer/
 
 ---
 
-## 📱 1. Android Companion App
+## <img src="docs/icons/smartphone.svg" width="18" height="18" alt="" valign="middle" /> 1. Android Companion App
 
 The Android companion application is built with **Clean Architecture + MVI/MVVM** principles using 100% **Jetpack Compose (Material 3)**, **Hilt Dependency Injection**, and **Kotlin Coroutines / StateFlow**.
 
@@ -204,7 +230,7 @@ The Android companion application is built with **Clean Architecture + MVI/MVVM*
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 📱 Main Tabs & Features
+### Main Tabs & Features
 
 1. **Send Screen (`SendScreen.kt`)**:
    * **Quick Media Filters**: Instant one-tap access to *Photos*, *Videos*, *Audio*, *Documents*, *Folders*, and *Custom Files*.
@@ -251,13 +277,13 @@ The Android companion application is built with **Clean Architecture + MVI/MVVM*
 
 ---
 
-## 🖥️ 2. Desktop Terminal UI (TUI)
+## <img src="docs/icons/terminal.svg" width="18" height="18" alt="" valign="middle" /> 2. Desktop Terminal UI (TUI)
 
 The Terminal User Interface is built with **Ratatui 0.28** and **Crossterm**, featuring a decoupled architecture with a non-blocking **250 ms asynchronous polling loop** matching the Rust `MetaActor` disk flush frequency.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ 🚀 TurboTransfer TUI                                    [Mode: Multipath]   |
+│   TurboTransfer TUI                                     [Mode: Multipath]   │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  [1] Send Files        [3] Devices          [5] Benchmark                   │
 │  [2] Receive Mode      [4] Transfers        [6] Settings                    │
@@ -278,7 +304,7 @@ The Terminal User Interface is built with **Ratatui 0.28** and **Crossterm**, fe
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 🎛️ Complete 15-Screen Matrix
+### Complete 15-Screen Matrix
 
 | Screen | Identifier | Description | Key Navigation |
 |---|---|---|---|
@@ -298,7 +324,7 @@ The Terminal User Interface is built with **Ratatui 0.28** and **Crossterm**, fe
 | **14** | `BenchmarkResults` | Benchmark/calibration scorecard with throughput metrics & saved config | `Esc` (Back to Benchmark), `M` / `Enter` (Main Menu) |
 | **15** | `Settings` | 6 modular configuration tabs with persistent JSON storage | `Tab` / `Left`/`Right`, `1`–`6`, `Up`/`Down`, `Space`/`Enter` |
 
-### ⌨️ Global TUI Shortcuts
+### Global TUI Shortcuts
 
 * **`1` – `6`**: Jump directly to Main Menu screens (*Send*, *Receive*, *Devices*, *Transfers*, *Benchmark*, *Settings*).
 * **`Up` / `Down` (or `k` / `j`)**: Navigate lists and menus.
@@ -313,7 +339,7 @@ The Terminal User Interface is built with **Ratatui 0.28** and **Crossterm**, fe
 
 ---
 
-## ⚡ 3. Command-Line Interface (`turbo`)
+## <img src="docs/icons/terminal.svg" width="18" height="18" alt="" valign="middle" /> 3. Command-Line Interface (`turbo`)
 
 The `turbo` CLI provides a lightweight, scriptable binary for automated pipelines, headless servers, terminal power users, and synthetic link tuning.
 
@@ -359,7 +385,7 @@ turbo resume --transfer-id 4a7c1b52-9685-48b0-a54b-d7589d81d2f6
 turbo cancel 4a7c1b52-9685-48b0-a54b-d7589d81d2f6
 ```
 
-### 📋 CLI Command Reference
+### CLI Command Reference
 
 | Subcommand | Options / Flags | Default | Description |
 |---|---|---|---|
@@ -376,11 +402,11 @@ turbo cancel 4a7c1b52-9685-48b0-a54b-d7589d81d2f6
 
 ---
 
-## 🎛️ 4. Automated Parameter Calibration & Congestion Control
+## <img src="docs/icons/cpu.svg" width="18" height="18" alt="" valign="middle" /> 4. The Speed Engine: AIMD Windowing & Autonomous Calibration
 
-TurboTransfer features an adaptive scheduler that continuously tunes transmission dynamics to match physical hardware limits.
+Transmission dynamics are governed by adaptive algorithms tuned to physical link physics.
 
-### 🧪 10-Step Parameter Calibration Sweep
+### 10-Step Parameter Calibration Sweep
 
 To eliminate manual trial-and-error, TurboTransfer includes an autonomous calibration engine (`core/src/benchmark/calibration.rs`):
 
@@ -392,7 +418,7 @@ To eliminate manual trial-and-error, TurboTransfer includes an autonomous calibr
 3. **Persistent Profile Storage**: The winning configuration is serialized to `%APPDATA%\turbotransfer\calibrations.json` (Windows) or app local storage (Android). Subsequent transfers to that peer automatically load and apply the optimal parameters.
 4. **Non-Destructive Ephemeral Testing**: Benchmark files are tagged with dedicated wire flags and cleaned up immediately after evaluation without touching user storage.
 
-### 📈 AIMD Concurrency Window Controller
+### AIMD Concurrency Window Controller
 
 Transmission across asymmetric links (e.g. low-latency USB + high-BDP Wi-Fi) is stabilized via the AIMD Window Controller (`WindowController` in `core/src/scheduler/window.rs`):
 
@@ -404,11 +430,11 @@ Transmission across asymmetric links (e.g. low-latency USB + high-BDP Wi-Fi) is 
 
 ---
 
-## 📊 5. Telemetry, Structured Logging & Bottleneck Diagnostics
+## <img src="docs/icons/activity.svg" width="18" height="18" alt="" valign="middle" /> 5. Zero-Overhead Telemetry: The Microsecond Stethoscope
 
-TurboTransfer incorporates an **in-memory, zero-overhead telemetry engine** that monitors microsecond timings across every layer of the transmission pipeline without locking or impacting active throughput.
+TurboTransfer embeds an **in-memory, microsecond-resolution telemetry engine** that diagnoses bottlenecks without adding latency or locking streaming threads.
 
-### ⚡ Non-Blocking Telemetry Architecture
+### Non-Blocking Telemetry Architecture
 * **In-Memory Sampling**: Per-chunk disk reads, xxHash64/CRC calculations, socket writes, and receiver flash writes are recorded via atomic counters (`Relaxed`) and pre-allocated ring buffers ($\approx 50\text{--}100\text{ ns}$ recording time).
 * **Zero Disk Contention**: Log files are **only serialized and flushed to disk after** a transfer completes, pauses, or fails. Active streaming is never blocked by disk log I/O.
 * **Per-Channel & Bonded Stream Metrics**: Separately tracks throughput, average socket write microseconds, P95/Avg round-trip times (RTT), NACK retries, and disconnect events for USB (ADB Tunnel) and individual bonded Wi-Fi TCP streams (`WiFi-Stream-1..4`).
@@ -447,7 +473,7 @@ flowchart TD
     Classifier --> Storage
 ```
 
-### 🎯 Automated Bottleneck Classifications
+### Automated Bottleneck Classifications
 
 | Verdict Code | Detection Trigger | Root Cause & Actionable Recommendation |
 |---|---|---|
@@ -458,7 +484,7 @@ flowchart TD
 | `NETWORK_BANDWIDTH_LIMIT` | Storage and CPU engines have $>2\times$ headroom above wire throughput | The transfer is operating at 100% of the physical link capacity (e.g. USB 2.0 480 Mbps ceiling or standard Wi-Fi airtime). |
 | `BALANCED_WIRE_SPEED` | Pipeline throughput is well-balanced across CPU, storage, and network links | Optimal wire-speed performance achieved without pipeline stalls. |
 
-### 📂 Diagnostic Log File Locations
+### Diagnostic Log File Locations
 
 Each completed, paused, or failed transfer automatically generates both structured JSON and human-readable `.log` files:
 
@@ -475,7 +501,7 @@ Each completed, paused, or failed transfer automatically generates both structur
 
 ---
 
-## 🛠️ Build & Installation Guide
+## <img src="docs/icons/wrench.svg" width="18" height="18" alt="" valign="middle" /> Build & Installation Guide
 
 ### 1. Prerequisites
 
@@ -553,7 +579,7 @@ cd android
 
 ---
 
-## 🔌 Connection & Transfer Scenarios
+## <img src="docs/icons/cable.svg" width="18" height="18" alt="" valign="middle" /> Connection & Transfer Scenarios
 
 ### Scenario A: USB Only (ADB Reverse Tunnel)
 *Best for ultra-stable wired transfers with zero wireless setup.*
@@ -596,7 +622,7 @@ cd android
 
 ---
 
-## ⚙️ Configuration (`settings.json`)
+## <img src="docs/icons/settings.svg" width="18" height="18" alt="" valign="middle" /> Configuration (`settings.json`)
 
 TUI and CLI configurations are stored in `%APPDATA%\turbotransfer\settings.json` (Windows) or `~/.config/turbotransfer/settings.json` (Linux/macOS):
 
@@ -633,7 +659,7 @@ TUI and CLI configurations are stored in `%APPDATA%\turbotransfer\settings.json`
 
 ---
 
-## 🧪 Automated Testing Suite
+## <img src="docs/icons/flask.svg" width="18" height="18" alt="" valign="middle" /> Automated Testing Suite
 
 TurboTransfer features a comprehensive test suite of **92 automated unit, integration, and simulation tests** spanning 14 test suites across the workspace:
 
@@ -664,7 +690,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\phone-builder.ps1 test -Package
 
 ---
 
-## 📦 Automated Releases (GitHub Actions)
+## <img src="docs/icons/package.svg" width="18" height="18" alt="" valign="middle" /> Automated Releases (GitHub Actions)
 
 TurboTransfer features a fully automated GitHub Actions CI/CD release pipeline ([`.github/workflows/release.yml`](.github/workflows/release.yml)) that builds, packages, signs, and publishes official releases for **TUI** and **Android APK**:
 
@@ -689,6 +715,6 @@ TurboTransfer features a fully automated GitHub Actions CI/CD release pipeline (
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the [MIT License](LICENSE).
