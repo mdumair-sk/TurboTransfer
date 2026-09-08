@@ -23,10 +23,10 @@ impl WindowPreset {
     /// Returns (min_window, max_window, initial_window, socket_backpressure_threshold_us, rtt_congestion_threshold_us)
     pub fn to_thresholds(self) -> (usize, usize, usize, f64, f64) {
         match self {
-            Self::Conservative => (8, 24, 12, 300_000.0, 1_200_000.0),
-            Self::Balanced => (12, 32, 16, 400_000.0, 1_500_000.0), // current for_wifi()
-            Self::Aggressive => (16, 48, 24, 550_000.0, 2_000_000.0),
-            Self::Max => (24, 64, 32, 700_000.0, 2_500_000.0),
+            Self::Conservative => (12, 32, 16, 350_000.0, 1_500_000.0),
+            Self::Balanced => (16, 48, 24, 500_000.0, 2_000_000.0), // matches for_wifi()
+            Self::Aggressive => (20, 56, 28, 600_000.0, 2_200_000.0),
+            Self::Max => (24, 64, 32, 750_000.0, 2_500_000.0),
         }
     }
 }

@@ -8,7 +8,7 @@ use uuid::Uuid;
 use turbotransfer_core::manifest::TransferStatus;
 use turbotransfer_core::protocol::{ChunkAckData, ChunkNackData, Message};
 use turbotransfer_core::scheduler::{MultipathScheduler, SchedulerConfig};
-use turbotransfer_core::transport::{Transport, TransportError, TransportKind, TransportStatus};
+use turbotransfer_core::transport::{Transport, TransportError, TransportKind, TransportReadHalf, TransportStatus, TransportWriteHalf};
 
 /// Mock controllable transport for testing §15 scenarios in isolation.
 struct MockTransport {
@@ -79,6 +79,78 @@ impl Transport for MockTransport {
         let mut st = self.status.lock().unwrap();
         *st = TransportStatus::Disconnected;
         Ok(())
+    }
+
+    fn split_boxed(
+        self: Box<Self>,
+    ) -> Result<(Box<dyn TransportWriteHalf>, Box<dyn TransportReadHalf>), TransportError> {
+        let w = MockWriteHalf {
+            sent_frames: self.sent_frames.clone(),
+            status: self.status.clone(),
+            drop_on_send: self.drop_on_send.clone(),
+            bytes_sent: self.bytes_sent.clone(),
+        };
+        let r = MockReadHalf {
+            incoming_frames: self.incoming_frames.clone(),
+            status: self.status.clone(),
+            bytes_received: self.bytes_received.clone(),
+        };
+        Ok((Box::new(w), Box::new(r)))
+    }
+}
+
+struct MockWriteHalf {
+    sent_frames: Arc<Mutex<Vec<Message>>>,
+    status: Arc<std::sync::Mutex<TransportStatus>>,
+    drop_on_send: Arc<AtomicBool>,
+    bytes_sent: Arc<AtomicU64>,
+}
+
+#[async_trait]
+impl TransportWriteHalf for MockWriteHalf {
+    async fn send_frame(&mut self, msg: &Message) -> Result<(), TransportError> {
+        let current_status = *self.status.lock().unwrap();
+        if current_status != TransportStatus::Connected || self.drop_on_send.load(Ordering::Relaxed) {
+            *self.status.lock().unwrap() = TransportStatus::Disconnected;
+            return Err(TransportError::Disconnected("Mock transport drop".into()));
+        }
+
+        self.sent_frames.lock().await.push(msg.clone());
+        self.bytes_sent.fetch_add(1024, Ordering::Relaxed);
+        Ok(())
+    }
+
+    async fn close(&mut self) -> Result<(), TransportError> {
+        let mut st = self.status.lock().unwrap();
+        *st = TransportStatus::Disconnected;
+        Ok(())
+    }
+
+    fn bytes_sent(&self) -> u64 {
+        self.bytes_sent.load(Ordering::Relaxed)
+    }
+}
+
+struct MockReadHalf {
+    incoming_frames: Arc<Mutex<VecDeque<Message>>>,
+    status: Arc<std::sync::Mutex<TransportStatus>>,
+    bytes_received: Arc<AtomicU64>,
+}
+
+#[async_trait]
+impl TransportReadHalf for MockReadHalf {
+    async fn receive_frame(&mut self) -> Result<Option<Message>, TransportError> {
+        let current_status = *self.status.lock().unwrap();
+        if current_status != TransportStatus::Connected {
+            return Err(TransportError::Disconnected("Mock transport disconnected".into()));
+        }
+
+        let mut queue = self.incoming_frames.lock().await;
+        Ok(queue.pop_front())
+    }
+
+    fn bytes_received(&self) -> u64 {
+        self.bytes_received.load(Ordering::Relaxed)
     }
 }
 

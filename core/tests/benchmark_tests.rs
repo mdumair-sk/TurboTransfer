@@ -398,20 +398,34 @@ async fn calibration_test_e2e_loopback_sweep() {
 async fn benchmark_test_physical_dual_channel_multipath() {
     let dual_addr = std::env::var("TURBOTRANSFER_TEST_PEER_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:9876, 192.168.1.11:9876".to_string());
-    let size_mb = 50;
+    let size_mb: u32 = std::env::var("TURBOTRANSFER_BENCH_SIZE_MB")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(50);
 
     println!("==================================================");
     println!("PHYSICAL DUAL-CHANNEL MULTIPATH BENCHMARK PUSH");
-    println!("Targets: USB (127.0.0.1:9876) + Wi-Fi (192.168.1.11:9876)");
-    println!("Payload: {} MB (52,428,800 bytes)", size_mb);
+    println!("Targets: {}", dual_addr);
+    println!("Payload: {} MB ({} bytes)", size_mb, (size_mb as u64) * 1024 * 1024);
     println!("Mode: Combined (Simultaneous Bonded Multi-Channel)");
     println!("==================================================");
 
-    let result = turbotransfer_core::transfer::api::run_benchmark_with_address(
+    let chunk_size_env: Option<u32> = std::env::var("TURBOTRANSFER_BENCH_CHUNK_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok());
+    let config = turbotransfer_core::benchmark::TransferConfigOverride {
+        wifi_stream_count: Some(4),
+        chunk_size_bytes: chunk_size_env.or(Some(1024 * 1024)),
+        wifi_window_preset: Some(turbotransfer_core::benchmark::WindowPreset::Max),
+    };
+    let result = turbotransfer_core::benchmark::run_benchmark_transfer(
         None,
         Some(&dual_addr),
         turbotransfer_core::transfer::api::TransportPreference::Combined,
         size_mb,
+        Some(&config),
+        turbotransfer_core::benchmark::TransferPurpose::Benchmark,
+        None,
     )
     .await
     .expect("Dual-channel multipath benchmark failed");
@@ -428,4 +442,17 @@ async fn benchmark_test_physical_dual_channel_multipath() {
 
     assert!(result.throughput_mbps > 0.0);
     assert_eq!(result.bytes_transferred, (size_mb as u64) * 1024 * 1024);
+}
+
+#[tokio::test]
+#[ignore]
+async fn benchmark_test_pc_receiver_listener() {
+    let dest_dir = std::env::temp_dir().join("turbotransfer_pc_recv");
+    std::fs::create_dir_all(&dest_dir).unwrap();
+    let addr = "0.0.0.0:9876".to_string();
+    let _receiver = turbotransfer_core::transfer::api::enter_receive_mode(Some(addr), dest_dir).await.unwrap();
+    println!("PC Receiver listening on 0.0.0.0:9876! Ready for phone incoming transfers.");
+    for _ in 0..120 {
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    }
 }

@@ -105,8 +105,36 @@ pub trait Transport: Send + Sync {
 
     /// Gracefully closes or shuts down the transport channel.
     async fn close(&mut self) -> Result<(), TransportError>;
+
+    /// Splits the transport into decoupled write and read halves for concurrent full-duplex operation (§10).
+    fn split_boxed(
+        self: Box<Self>,
+    ) -> Result<(Box<dyn TransportWriteHalf>, Box<dyn TransportReadHalf>), TransportError>;
 }
 
+/// Write half of a decoupled full-duplex transport channel (§8, §9).
+#[async_trait]
+pub trait TransportWriteHalf: Send + Sync {
+    /// Transmits a protocol frame over the transport write channel.
+    async fn send_frame(&mut self, msg: &Message) -> Result<(), TransportError>;
+
+    /// Gracefully closes or shuts down the transport write channel.
+    async fn close(&mut self) -> Result<(), TransportError>;
+
+    /// Total payload and framing bytes sent through this write half.
+    fn bytes_sent(&self) -> u64;
+}
+
+/// Read half of a decoupled full-duplex transport channel (§8, §9).
+#[async_trait]
+pub trait TransportReadHalf: Send + Sync {
+    /// Receives the next protocol frame from the transport read channel.
+    /// Returns `Ok(None)` if the connection reached EOF cleanly.
+    async fn receive_frame(&mut self) -> Result<Option<Message>, TransportError>;
+
+    /// Total payload and framing bytes received through this read half.
+    fn bytes_received(&self) -> u64;
+}
 #[async_trait]
 impl Transport for Box<dyn Transport> {
     fn kind(&self) -> TransportKind {
@@ -135,5 +163,11 @@ impl Transport for Box<dyn Transport> {
 
     async fn close(&mut self) -> Result<(), TransportError> {
         (**self).close().await
+    }
+
+    fn split_boxed(
+        self: Box<Self>,
+    ) -> Result<(Box<dyn TransportWriteHalf>, Box<dyn TransportReadHalf>), TransportError> {
+        (*self).split_boxed()
     }
 }

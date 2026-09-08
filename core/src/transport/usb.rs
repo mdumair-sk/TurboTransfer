@@ -10,7 +10,7 @@ use tokio::io::{AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use uuid::Uuid;
 
-use super::{Transport, TransportError, TransportKind, TransportStatus};
+use super::{Transport, TransportError, TransportKind, TransportReadHalf, TransportStatus, TransportWriteHalf};
 use crate::protocol::{encode_frame, encode_frame_parts, FrameReader, HelloData, Message};
 
 /// Default reconnect poll interval (2s per TRD §8).
@@ -709,16 +709,19 @@ impl Transport for UsbTransport {
                 e
             )));
         }
-
-        if let Err(e) = writer.flush().await {
-            self.status = TransportStatus::Disconnected;
-            error!("USB socket flush error -> marked Disconnected: {}", e);
-            return Err(TransportError::Disconnected(format!(
-                "USB socket flush failed: {}",
-                e
-            )));
+        if !matches!(
+            msg,
+            Message::ChunkData(_) | Message::ChunkAck(_) | Message::BatchChunkAck(_)
+        ) {
+            if let Err(e) = writer.flush().await {
+                self.status = TransportStatus::Disconnected;
+                error!("USB socket flush error -> marked Disconnected: {}", e);
+                return Err(TransportError::Disconnected(format!(
+                    "USB socket flush failed: {}",
+                    e
+                )));
+            }
         }
-
         self.bytes_sent.fetch_add(frame_len, Ordering::Relaxed);
         Ok(())
     }
@@ -762,6 +765,153 @@ impl Transport for UsbTransport {
         self.cleanup_tunnel();
         info!("USB transport closed cleanly");
         Ok(())
+    }
+
+    fn split_boxed(
+        mut self: Box<Self>,
+    ) -> Result<(Box<dyn TransportWriteHalf>, Box<dyn TransportReadHalf>), TransportError> {
+        let is_conn = Arc::new(AtomicBool::new(self.status == TransportStatus::Connected));
+        let write_half = UsbWriteHalf {
+            writer: self.writer.take(),
+            bytes_sent: self.bytes_sent.clone(),
+            status: is_conn.clone(),
+            active_serial: self.active_serial.clone(),
+            config: self.config.clone(),
+            cleaned_up: self.cleaned_up.clone(),
+        };
+        let read_half = UsbReadHalf {
+            reader: self.reader.take(),
+            bytes_received: self.bytes_received.clone(),
+            status: is_conn,
+        };
+        Ok((Box::new(write_half), Box::new(read_half)))
+    }
+}
+
+/// Write half of a decoupled USB transport (§8, §9, §10).
+pub struct UsbWriteHalf {
+    writer: Option<WriteHalf<TcpStream>>,
+    bytes_sent: Arc<AtomicU64>,
+    status: Arc<AtomicBool>,
+    active_serial: Option<String>,
+    config: UsbTransportConfig,
+    cleaned_up: Arc<AtomicBool>,
+}
+
+impl UsbWriteHalf {
+    pub fn cleanup_tunnel(&self) {
+        if self.cleaned_up.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        if let Some(serial) = &self.active_serial {
+            let _ = UsbTransport::remove_adb_forward(serial, self.config.local_port);
+            let _ = UsbTransport::remove_adb_reverse(serial, self.config.remote_port);
+        }
+    }
+}
+
+impl Drop for UsbWriteHalf {
+    fn drop(&mut self) {
+        self.cleanup_tunnel();
+    }
+}
+
+#[async_trait]
+impl TransportWriteHalf for UsbWriteHalf {
+    async fn send_frame(&mut self, msg: &Message) -> Result<(), TransportError> {
+        if !self.status.load(Ordering::Relaxed) {
+            return Err(TransportError::Disconnected(
+                "Cannot send frame: USB write half is disconnected".into(),
+            ));
+        }
+
+        let writer = self.writer.as_mut().ok_or_else(|| {
+            TransportError::Disconnected("USB transport writer is unavailable".into())
+        })?;
+
+        let (header, maybe_payload) = encode_frame_parts(msg)?;
+        let payload = maybe_payload.unwrap_or(&[]);
+        let frame_len = (header.len() + payload.len()) as u64;
+
+        if let Err(e) = super::vectored::write_all_vectored(writer, &header, payload).await {
+            self.status.store(false, Ordering::Relaxed);
+            error!("USB socket write error -> marked Disconnected: {}", e);
+            return Err(TransportError::Disconnected(format!(
+                "USB socket write failed: {}",
+                e
+            )));
+        }
+
+        if !matches!(
+            msg,
+            Message::ChunkData(_) | Message::ChunkAck(_) | Message::BatchChunkAck(_)
+        ) {
+            if let Err(e) = writer.flush().await {
+                self.status.store(false, Ordering::Relaxed);
+                error!("USB socket flush error -> marked Disconnected: {}", e);
+                return Err(TransportError::Disconnected(format!(
+                    "USB socket flush failed: {}",
+                    e
+                )));
+            }
+        }
+
+        self.bytes_sent.fetch_add(frame_len, Ordering::Relaxed);
+        Ok(())
+    }
+
+    async fn close(&mut self) -> Result<(), TransportError> {
+        self.status.store(false, Ordering::Relaxed);
+        if let Some(mut writer) = self.writer.take() {
+            let _ = writer.shutdown().await;
+        }
+        self.cleanup_tunnel();
+        Ok(())
+    }
+
+    fn bytes_sent(&self) -> u64 {
+        self.bytes_sent.load(Ordering::Relaxed)
+    }
+}
+
+/// Read half of a decoupled USB transport (§8, §9, §10).
+pub struct UsbReadHalf {
+    reader: Option<FrameReader<ReadHalf<TcpStream>>>,
+    bytes_received: Arc<AtomicU64>,
+    status: Arc<AtomicBool>,
+}
+
+#[async_trait]
+impl TransportReadHalf for UsbReadHalf {
+    async fn receive_frame(&mut self) -> Result<Option<Message>, TransportError> {
+        if !self.status.load(Ordering::Relaxed) {
+            return Err(TransportError::Disconnected(
+                "Cannot receive frame: USB read half is disconnected".into(),
+            ));
+        }
+
+        let reader = self.reader.as_mut().ok_or_else(|| {
+            TransportError::Disconnected("USB transport reader is unavailable".into())
+        })?;
+
+        match reader.read_frame_with_length().await {
+            Ok(Some((msg, frame_len))) => {
+                self.bytes_received.fetch_add(frame_len as u64, Ordering::Relaxed);
+                Ok(Some(msg))
+            }
+            Ok(None) => {
+                self.status.store(false, Ordering::Relaxed);
+                Ok(None)
+            }
+            Err(e) => {
+                self.status.store(false, Ordering::Relaxed);
+                Err(TransportError::from(e))
+            }
+        }
+    }
+
+    fn bytes_received(&self) -> u64 {
+        self.bytes_received.load(Ordering::Relaxed)
     }
 }
 

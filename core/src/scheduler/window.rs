@@ -5,13 +5,13 @@ use super::model::ChannelPerformanceModel;
 use super::tracker::ChannelTracker;
 
 /// Default window presets
-pub const USB_MIN_WINDOW: usize = 8;
-pub const USB_MAX_WINDOW: usize = 32;
-pub const USB_INITIAL_WINDOW: usize = 16;
+pub const USB_MIN_WINDOW: usize = 12;
+pub const USB_MAX_WINDOW: usize = 48;
+pub const USB_INITIAL_WINDOW: usize = 20;
 
-pub const WIFI_MIN_WINDOW: usize = 12;
-pub const WIFI_MAX_WINDOW: usize = 32;
-pub const WIFI_INITIAL_WINDOW: usize = 16;
+pub const WIFI_MIN_WINDOW: usize = 16;
+pub const WIFI_MAX_WINDOW: usize = 48;
+pub const WIFI_INITIAL_WINDOW: usize = 24;
 
 /// Configuration and controller for channel concurrency window sizing.
 #[derive(Debug, Clone)]
@@ -80,12 +80,12 @@ impl WindowController {
 
     /// Presets tailored for USB (high bandwidth, low latency).
     pub fn for_usb() -> Self {
-        Self::with_thresholds(USB_MIN_WINDOW, USB_MAX_WINDOW, USB_INITIAL_WINDOW, 50_000.0, 200_000.0)
+        Self::with_thresholds(USB_MIN_WINDOW, USB_MAX_WINDOW, USB_INITIAL_WINDOW, 350_000.0, 1_200_000.0)
     }
 
     /// Presets tailored for Wi-Fi Direct / TCP streams (higher RTT, larger in-flight needed for pipeline fill).
     pub fn for_wifi() -> Self {
-        Self::with_thresholds(WIFI_MIN_WINDOW, WIFI_MAX_WINDOW, WIFI_INITIAL_WINDOW, 400_000.0, 1_500_000.0)
+        Self::with_thresholds(WIFI_MIN_WINDOW, WIFI_MAX_WINDOW, WIFI_INITIAL_WINDOW, 500_000.0, 2_000_000.0)
     }
 
     /// Evaluates recent channel performance and updates the allowable in-flight window.

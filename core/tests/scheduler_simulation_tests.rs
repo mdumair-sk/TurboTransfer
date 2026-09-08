@@ -191,7 +191,7 @@ fn test_aimd_window_controller() {
     let mut window = WindowController::for_usb();
     let chunk_size = 2 * 1024 * 1024;
 
-    assert_eq!(window.current_window, 16);
+    assert_eq!(window.current_window, 20);
 
     // Warm up healthy transmission with goodput gains
     for i in 0..10 {
@@ -201,17 +201,17 @@ fn test_aimd_window_controller() {
     }
 
     // Window should expand via Additive Increase
-    assert!(window.current_window >= 17, "Window should expand on healthy gain, got {}", window.current_window);
+    assert!(window.current_window >= 21, "Window should expand on healthy gain, got {}", window.current_window);
 
     // Simulate multi-signal congestion (high socket duration + RTT inflation + no goodput gain)
     let mut win_after_congestion = window.current_window;
     for i in 10..20 {
         tracker.record_chunk_sent(i, chunk_size);
-        simulate_chunk_ack(&mut tracker, &mut model, i, chunk_size, 1_200_000, 80_000, Some(1_200_000));
+        simulate_chunk_ack(&mut tracker, &mut model, i, chunk_size, 1_500_000, 400_000, Some(1_500_000));
         win_after_congestion = window.evaluate_and_adjust(&tracker, &model);
     }
 
-    assert!(win_after_congestion <= 16, "Window should reduce on corroborated congestion, got {}", win_after_congestion);
+    assert!(win_after_congestion <= 18, "Window should reduce on corroborated congestion, got {}", win_after_congestion);
 }
 
 /// Test 8: Completion Prediction Accuracy.

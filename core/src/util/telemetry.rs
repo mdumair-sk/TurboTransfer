@@ -660,7 +660,7 @@ impl TransferTelemetry {
                     "Network packet corruption or disconnect detected (NACKs: {}, Disconnects: {}). Check physical USB connection or 5GHz Wi-Fi line-of-sight.",
                     total_nacks, total_disconnects
                 ));
-            } else if max_rtt_avg > 60.0 || max_rtt_p95 > 100.0 || total_nacks > 0 {
+            } else if total_nacks > 0 || ((max_rtt_avg > 600.0 || max_rtt_p95 > 1000.0) && avg_throughput_mbps < 70.0) {
                 primary_bottleneck = "NETWORK_LATENCY_JITTER".to_string();
                 recommendations.push(format!(
                     "Network latency or jitter detected (Avg RTT: {:.1} ms, P95: {:.1} ms, NACKs: {}). Round-trip latency is constraining sliding window pipeline efficiency.",
@@ -672,7 +672,7 @@ impl TransferTelemetry {
                     "xxHash64 / CRC32C computation took {:.1} ms per chunk ({:.1} MB/s). CPU computation throttled the transfer pipeline.",
                     hash_avg_us / 1000.0, sender_checksum_mbps
                 ));
-            } else if avg_throughput_mbps >= 150.0 {
+            } else if avg_throughput_mbps >= 70.0 {
                 primary_bottleneck = "BALANCED_WIRE_SPEED".to_string();
                 recommendations.push(format!(
                     "Optimal wire-speed performance achieved ({:.1} MB/s average, peak {:.1} MB/s). Pipeline stages operated without stalls.",

@@ -9,7 +9,7 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use log::{debug, error, info, warn};
 
-use super::{Transport, TransportError, TransportKind, TransportStatus};
+use super::{Transport, TransportError, TransportKind, TransportReadHalf, TransportStatus, TransportWriteHalf};
 use crate::protocol::{encode_frame_parts, FrameReader, Message};
 
 /// Default heartbeat failure timeout (15s per TRD §9 & implementation prompt 7b).
@@ -532,16 +532,19 @@ impl Transport for WifiDirectTransport {
                 e
             )));
         }
-
-        if let Err(e) = writer.flush().await {
-            self.status = TransportStatus::Disconnected;
-            error!("Wi-Fi Direct socket flush error -> marked Disconnected: {}", e);
-            return Err(TransportError::Disconnected(format!(
-                "Wi-Fi Direct socket flush failed: {}",
-                e
-            )));
+        if !matches!(
+            msg,
+            Message::ChunkData(_) | Message::ChunkAck(_) | Message::BatchChunkAck(_)
+        ) {
+            if let Err(e) = writer.flush().await {
+                self.status = TransportStatus::Disconnected;
+                error!("Wi-Fi Direct socket flush error -> marked Disconnected: {}", e);
+                return Err(TransportError::Disconnected(format!(
+                    "Wi-Fi Direct socket flush failed: {}",
+                    e
+                )));
+            }
         }
-
         self.bytes_sent.fetch_add(frame_len, Ordering::Relaxed);
         Ok(())
     }
@@ -588,9 +591,136 @@ impl Transport for WifiDirectTransport {
             let _ = writer.shutdown().await;
         }
         self.reader = None;
-        self.cleanup_profile();
         info!("Wi-Fi Direct transport closed cleanly");
         Ok(())
+    }
+
+    fn split_boxed(
+        mut self: Box<Self>,
+    ) -> Result<(Box<dyn TransportWriteHalf>, Box<dyn TransportReadHalf>), TransportError> {
+        let is_conn = Arc::new(AtomicBool::new(self.status == TransportStatus::Connected));
+        let write_half = WifiDirectWriteHalf {
+            writer: self.writer.take(),
+            bytes_sent: self.bytes_sent.clone(),
+            status: is_conn.clone(),
+        };
+        let read_half = WifiDirectReadHalf {
+            reader: self.reader.take(),
+            bytes_received: self.bytes_received.clone(),
+            status: is_conn,
+            last_frame_received: self.last_frame_received.clone(),
+        };
+        Ok((Box::new(write_half), Box::new(read_half)))
+    }
+}
+
+/// Write half of a decoupled Wi-Fi Direct transport (§8, §9, §10).
+pub struct WifiDirectWriteHalf {
+    writer: Option<WriteHalf<TcpStream>>,
+    bytes_sent: Arc<AtomicU64>,
+    status: Arc<AtomicBool>,
+}
+
+#[async_trait]
+impl TransportWriteHalf for WifiDirectWriteHalf {
+    async fn send_frame(&mut self, msg: &Message) -> Result<(), TransportError> {
+        if !self.status.load(Ordering::Relaxed) {
+            return Err(TransportError::Disconnected(
+                "Cannot send frame: Wi-Fi Direct write half is disconnected".into(),
+            ));
+        }
+
+        let writer = self.writer.as_mut().ok_or_else(|| {
+            TransportError::Disconnected("Wi-Fi Direct writer is unavailable".into())
+        })?;
+
+        let (header, maybe_payload) = encode_frame_parts(msg)?;
+        let payload = maybe_payload.unwrap_or(&[]);
+        let frame_len = (header.len() + payload.len()) as u64;
+
+        if let Err(e) = super::vectored::write_all_vectored(writer, &header, payload).await {
+            self.status.store(false, Ordering::Relaxed);
+            error!("Wi-Fi Direct socket write error -> marked Disconnected: {}", e);
+            return Err(TransportError::Disconnected(format!(
+                "Wi-Fi Direct socket write failed: {}",
+                e
+            )));
+        }
+
+        if !matches!(
+            msg,
+            Message::ChunkData(_) | Message::ChunkAck(_) | Message::BatchChunkAck(_)
+        ) {
+            if let Err(e) = writer.flush().await {
+                self.status.store(false, Ordering::Relaxed);
+                error!("Wi-Fi Direct socket flush error -> marked Disconnected: {}", e);
+                return Err(TransportError::Disconnected(format!(
+                    "Wi-Fi Direct socket flush failed: {}",
+                    e
+                )));
+            }
+        }
+
+        self.bytes_sent.fetch_add(frame_len, Ordering::Relaxed);
+        Ok(())
+    }
+
+    async fn close(&mut self) -> Result<(), TransportError> {
+        self.status.store(false, Ordering::Relaxed);
+        if let Some(mut writer) = self.writer.take() {
+            let _ = writer.shutdown().await;
+        }
+        Ok(())
+    }
+
+    fn bytes_sent(&self) -> u64 {
+        self.bytes_sent.load(Ordering::Relaxed)
+    }
+}
+
+/// Read half of a decoupled Wi-Fi Direct transport (§8, §9, §10).
+pub struct WifiDirectReadHalf {
+    reader: Option<FrameReader<ReadHalf<TcpStream>>>,
+    bytes_received: Arc<AtomicU64>,
+    status: Arc<AtomicBool>,
+    last_frame_received: Arc<Mutex<Instant>>,
+}
+
+#[async_trait]
+impl TransportReadHalf for WifiDirectReadHalf {
+    async fn receive_frame(&mut self) -> Result<Option<Message>, TransportError> {
+        if !self.status.load(Ordering::Relaxed) {
+            return Err(TransportError::Disconnected(
+                "Cannot receive frame: Wi-Fi Direct read half is disconnected".into(),
+            ));
+        }
+
+        let reader = self.reader.as_mut().ok_or_else(|| {
+            TransportError::Disconnected("Wi-Fi Direct reader is unavailable".into())
+        })?;
+
+        match reader.read_frame_with_length().await {
+            Ok(Some((msg, frame_len))) => {
+                {
+                    let mut last = self.last_frame_received.lock().await;
+                    *last = Instant::now();
+                }
+                self.bytes_received.fetch_add(frame_len as u64, Ordering::Relaxed);
+                Ok(Some(msg))
+            }
+            Ok(None) => {
+                self.status.store(false, Ordering::Relaxed);
+                Ok(None)
+            }
+            Err(e) => {
+                self.status.store(false, Ordering::Relaxed);
+                Err(TransportError::from(e))
+            }
+        }
+    }
+
+    fn bytes_received(&self) -> u64 {
+        self.bytes_received.load(Ordering::Relaxed)
     }
 }
 

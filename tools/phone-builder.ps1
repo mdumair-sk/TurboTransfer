@@ -122,7 +122,7 @@ elseif ($Command -eq "build-core") {
     $destFile = Join-Path $destDir "libturbotransfer_core.so"
 
     Write-Host "Pulling compiled shared library into jniLibs/arm64-v8a..." -ForegroundColor Cyan
-    $scpArgs = @("-P", "$Port", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR")
+    $scpArgs = @("-O", "-P", "$Port", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR")
     if (Test-Path $KeyPath) { $scpArgs += @("-i", $KeyPath) }
     $scpArgsLib = $scpArgs + @("localhost:turbotransfer/target/release/libturbotransfer_core.so", $destFile)
 

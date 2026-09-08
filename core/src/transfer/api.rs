@@ -347,7 +347,7 @@ pub fn update_transfer_transport_name(transfer_id: Uuid, name: String) {
     }
 }
 
-pub const DEFAULT_WIFI_PARALLEL_STREAMS: usize = 3;
+pub const DEFAULT_WIFI_PARALLEL_STREAMS: usize = 4;
 
 fn get_windows_hotspot_probe_ips() -> Vec<String> {
     let mut ips = Vec::new();
@@ -499,12 +499,21 @@ pub async fn resolve_and_connect_transports_with_streams(
                     for single_addr in explicit_addr.split(',') {
                         let trimmed = single_addr.trim();
                         if !trimmed.is_empty() {
-                            let is_usb = trimmed.contains("127.0.0.1") || trimmed.contains("localhost") || trimmed.contains("usb");
+                            let is_usb = trimmed.contains("127.0.0.1") || trimmed.contains("localhost") || trimmed.contains("usb") || trimmed.starts_with("10.125.") || trimmed.starts_with("192.168.42.");
                             if is_usb && !usb_connected {
-                                if let Ok(t) = TcpTransport::connect(trimmed).await {
-                                    transports.push((Box::new(t), true));
-                                    transport_names.push("USB (ADB Tunnel)".to_string());
-                                    usb_connected = true;
+                                let is_adb_tunnel = trimmed.contains("127.0.0.1") || trimmed.contains("localhost");
+                                let usb_stream_count = if is_adb_tunnel { 1 } else { 2 };
+                                for s_idx in 1..=usb_stream_count {
+                                    if let Ok(t) = TcpTransport::connect(trimmed).await {
+                                        transports.push((Box::new(t), true));
+                                        let label = if is_adb_tunnel {
+                                            "USB (ADB Tunnel)".to_string()
+                                        } else {
+                                            format!("USB (RNDIS Stream #{})", s_idx)
+                                        };
+                                        transport_names.push(label);
+                                        usb_connected = true;
+                                    }
                                 }
                             } else if !is_usb {
                                 for stream_idx in 1..=stream_count {
@@ -940,7 +949,10 @@ pub async fn enter_receive_mode(
                 accept_res = listener.accept() => {
                     match accept_res {
                         Ok((transport, peer_addr)) => {
-                            let is_usb = peer_addr.ip().is_loopback();
+                            let ip_str = peer_addr.ip().to_string();
+                            let is_usb = peer_addr.ip().is_loopback()
+                                || ip_str.starts_with("10.125.")
+                                || ip_str.starts_with("192.168.42.");
                             let tx = completion_tx.clone();
                             let ddir = dest_dir.clone();
                             crate::util::runtime::spawn_task(async move {
@@ -1164,12 +1176,11 @@ async fn handle_incoming_receive_transport(
                         }
                         DiskWriteCmd::Close(reply_tx) => {
                             let flush_res = writer_file.flush();
-                            let sync_res = writer_file.sync_all();
                             drop(writer_file);
                             let final_res = if let Some(ref err_msg) = *disk_error_clone.lock() {
                                 Err(std::io::Error::new(std::io::ErrorKind::Other, err_msg.clone()))
                             } else {
-                                flush_res.and(sync_res)
+                                flush_res
                             };
                             let _ = reply_tx.send(final_res);
                             break;
@@ -1422,6 +1433,12 @@ async fn handle_incoming_receive_transport(
                         let _ = std::fs::remove_file(&session.file_path);
                     } else {
                         std::fs::rename(&session.part_path, &session.file_path)?;
+                        let sync_path = session.file_path.clone();
+                        tokio::task::spawn_blocking(move || {
+                            if let Ok(file) = std::fs::OpenOptions::new().write(true).open(&sync_path) {
+                                let _ = file.sync_all();
+                            }
+                        });
                     }
                     set_transfer_status(complete_data.transfer_id, TransferStatus::Completed, None);
 
