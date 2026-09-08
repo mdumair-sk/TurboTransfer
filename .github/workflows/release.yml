@@ -173,8 +173,16 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
-
+          TAG="${{ github.ref_name }}"
+          if [[ -z "$TAG" || "$TAG" != v* ]]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          fi
+          VER_NAME="${TAG#v}"
+          if [[ -z "$VER_NAME" ]]; then
+            VER_NAME="0.2.0"
+          fi
+          echo "Building APK for release version: $VER_NAME (code: ${{ github.run_number }})"
+          ./gradlew assembleRelease -PversionName="$VER_NAME" -PversionCode="${{ github.run_number }}" --no-daemon
       - name: Sign & Finalize APK
         working-directory: android
         env:
