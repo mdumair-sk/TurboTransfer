@@ -11,6 +11,8 @@ import com.turbotransfer.domain.usecase.settings.GetSettingsUseCase
 import com.turbotransfer.domain.usecase.settings.UpdateSettingsUseCase
 import com.turbotransfer.domain.usecase.transfer.EnterReceiveModeUseCase
 import com.turbotransfer.domain.usecase.transfer.ObserveActiveTransferUseCase
+import com.turbotransfer.domain.usecase.transfer.ObserveReceiveListeningUseCase
+import com.turbotransfer.domain.usecase.transfer.ObserveReceiveStatusUseCase
 import com.turbotransfer.domain.usecase.transfer.StopReceiveModeUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
@@ -22,6 +24,8 @@ import javax.inject.Inject
 class ReceiveViewModel @Inject constructor(
     private val enterReceiveModeUseCase: EnterReceiveModeUseCase,
     private val stopReceiveModeUseCase: StopReceiveModeUseCase,
+    private val observeReceiveListeningUseCase: ObserveReceiveListeningUseCase,
+    private val observeReceiveStatusUseCase: ObserveReceiveStatusUseCase,
     private val observeActiveTransferUseCase: ObserveActiveTransferUseCase,
     private val observeHotspotStateUseCase: ObserveHotspotStateUseCase,
     private val startHotspotUseCase: StartHotspotUseCase,
@@ -41,6 +45,17 @@ class ReceiveViewModel @Inject constructor(
             )
         }
 
+        // Observe receiver listening state & status from repository
+        viewModelScope.launch {
+            observeReceiveListeningUseCase().collect { isListening ->
+                _uiState.update { it.copy(isListening = isListening) }
+            }
+        }
+        viewModelScope.launch {
+            observeReceiveStatusUseCase().collect { status ->
+                _uiState.update { it.copy(statusText = status) }
+            }
+        }
         // Observe hotspot state
         viewModelScope.launch {
             observeHotspotStateUseCase().collect { hotspotState ->

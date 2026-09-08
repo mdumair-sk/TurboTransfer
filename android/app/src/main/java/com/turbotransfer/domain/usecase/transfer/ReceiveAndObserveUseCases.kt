@@ -47,3 +47,19 @@ class PollIncomingTransferUseCase @Inject constructor(
         return transferRepository.pollPendingIncomingTransfer(saveDir)
     }
 }
+
+class ObserveReceiveListeningUseCase @Inject constructor(
+    private val transferRepository: TransferRepository
+) {
+    operator fun invoke(): StateFlow<Boolean> {
+        return transferRepository.isListeningFlow
+    }
+}
+
+class ObserveReceiveStatusUseCase @Inject constructor(
+    private val transferRepository: TransferRepository
+) {
+    operator fun invoke(): StateFlow<String> {
+        return transferRepository.receiveStatusFlow
+    }
+}

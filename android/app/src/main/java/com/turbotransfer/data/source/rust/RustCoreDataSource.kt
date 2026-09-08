@@ -48,7 +48,8 @@ class RustCoreDataSource @Inject constructor(
             )
             Result.success(status)
         } catch (e: Exception) {
-            if (e.message?.contains("already active") == true) {
+            val msg = e.message.orEmpty()
+            if (msg.contains("already active") || msg.contains("already in use") || msg.contains("already bound") || msg.contains("Address already in use")) {
                 Result.success("Listening on ${address?.ifBlank { "0.0.0.0:9876" } ?: "0.0.0.0:9876"}")
             } else {
                 Result.failure(e)

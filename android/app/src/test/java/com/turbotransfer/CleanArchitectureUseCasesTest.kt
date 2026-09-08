@@ -7,6 +7,8 @@ import com.turbotransfer.domain.repository.TransferRepository
 import com.turbotransfer.domain.usecase.history.AddHistoryRecordUseCase
 import com.turbotransfer.domain.usecase.history.GetHistoryUseCase
 import com.turbotransfer.domain.usecase.transfer.StartTransferUseCase
+import com.turbotransfer.domain.usecase.transfer.ObserveReceiveListeningUseCase
+import com.turbotransfer.domain.usecase.transfer.ObserveReceiveStatusUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -104,5 +106,23 @@ class CleanArchitectureUseCasesTest {
         val historyList = getUseCase().value
         assertEquals(1, historyList.size)
         assertEquals("sample.zip", historyList[0].fileName)
+    }
+
+    @Test
+    fun testObserveReceiveListeningUseCase() = runBlocking {
+        val fakeRepo = FakeTransferRepository()
+        val useCase = ObserveReceiveListeningUseCase(fakeRepo)
+        assertEquals(false, useCase().value)
+        fakeRepo.isListeningFlow.value = true
+        assertEquals(true, useCase().value)
+    }
+
+    @Test
+    fun testObserveReceiveStatusUseCase() = runBlocking {
+        val fakeRepo = FakeTransferRepository()
+        val useCase = ObserveReceiveStatusUseCase(fakeRepo)
+        assertEquals("Idle", useCase().value)
+        fakeRepo.receiveStatusFlow.value = "Listening on 0.0.0.0:9876"
+        assertEquals("Listening on 0.0.0.0:9876", useCase().value)
     }
 }

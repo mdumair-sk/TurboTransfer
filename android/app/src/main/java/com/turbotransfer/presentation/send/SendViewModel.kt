@@ -128,28 +128,29 @@ class SendViewModel @Inject constructor(
                 when (res) {
                     is Resource.Success -> {
                         val transferId = res.data
-                        var transferFinished = false
-
                         // Await terminal status for this specific item before proceeding to the next
-                        observeTransferProgressUseCase(transferId).takeWhile { !transferFinished }.collect { progress ->
-                            when (progress?.status) {
-                                TransferStatus.COMPLETED -> {
-                                    removeFileFromQueue(item)
-                                    transferFinished = true
-                                }
-                                TransferStatus.FAILED, TransferStatus.CANCELLED -> {
-                                    _uiState.update {
-                                        it.copy(
-                                            isQueueRunning = false,
-                                            userMessage = "Transfer failed for ${item.displayName}"
-                                        )
-                                    }
-                                    transferFinished = true
-                                }
-                                else -> {}
+                        val terminalProgress = observeTransferProgressUseCase(transferId)
+                            .filterNotNull()
+                            .first { progress ->
+                                progress.status == TransferStatus.COMPLETED
+                                    || progress.status == TransferStatus.FAILED
+                                    || progress.status == TransferStatus.CANCELLED
                             }
-                        }
 
+                        when (terminalProgress.status) {
+                            TransferStatus.COMPLETED -> {
+                                removeFileFromQueue(item)
+                            }
+                            TransferStatus.FAILED, TransferStatus.CANCELLED -> {
+                                _uiState.update {
+                                    it.copy(
+                                        isQueueRunning = false,
+                                        userMessage = "Transfer failed for ${item.displayName}"
+                                    )
+                                }
+                            }
+                            else -> {}
+                        }
                         // If stopped or cancelled, exit loop
                         if (!_uiState.value.isQueueRunning) {
                             return@launch

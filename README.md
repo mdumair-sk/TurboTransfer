@@ -78,9 +78,9 @@ graph TD
 * **Zero Router / Zero Internet Requirement**: Direct Android Local-Only Hotspot (5 GHz SoftAp) or Wi-Fi Direct P2P Group Owner mode enables wire-speed transfers anywhere off the grid.
 * **Clean Architecture Android App & Foreground Service**: 100% Jetpack Compose Material 3 UI backed by a foreground `TransferService` holding `FULL_LOW_LATENCY` / `FULL_HIGH_PERF` WifiLocks and partial WakeLocks, complete with system notification pause/resume/cancel controls.
 * **Full 15-Screen Ratatui Terminal UI**: Complete terminal cockpit with 250 ms non-blocking asynchronous polling matching backend flush cycles, type-ahead search, device discovery, deep diagnostics, and interactive benchmark/calibration suites.
+* **Clean Architecture & SOLID Domain Decomposition**: Modular Hexagonal / Ports & Adapters architecture eliminating monolithic God modules. Cleanly isolates Transfer State Registry, Endpoint Discovery, Receiver Daemon, Multi-Stream Sender, and unified $N \ge 1$ Streaming Pipeline with decoupled ADB process orchestration and zero-allocation static logger.
 * **Automation-Friendly CLI (`turbo`)**: Fast, scriptable command-line interface with real-time rolling terminal progress bars, log inspection (`turbo log`, `turbo logs`), benchmark tests (`turbo benchmark`), and link calibration sweeps (`turbo calibrate`).
 * **Snapdragon 8 Elite Native Build Offload**: Integrated developer tooling (`tools/phone-builder.ps1`) that offloads core Rust compilation and full test suites over ADB to Snapdragon 8 Elite Oryon cores in 0.2–2.5s (25x faster than host laptop).
-
 ---
 
 ## 📂 Project Architecture
@@ -95,9 +95,36 @@ TurboTransfer/
 │   │   ├── manifest/                   # File manifests, schema, MetaActor, meta.json persistence
 │   │   ├── protocol/                   # Wire framing, Message enums, Error types
 │   │   ├── scheduler/                  # Multipath scheduler, AIMD window controller, buffer pool, metrics
-│   │   ├── transfer/                   # TransferSession, Transfer API, Tracker, Registry
+│   │   ├── transfer/                   # Registry, discovery, receiver, sender, unified streaming pipeline
+│   │   │   ├── api.rs                  # Public API facade (zero-breaking-change re-exports)
+│   │   │   ├── discovery.rs            # Device & network endpoint discovery (ADB / Wi-Fi probe)
+│   │   │   ├── receiver.rs             # Receiver listener server & bounded disk writer actor
+│   │   │   ├── registry.rs             # Active transfer state store, progress & speed tracking
+│   │   │   ├── sender.rs               # Multi-stream sender orchestration & transport bonding
+│   │   │   ├── tracker.rs              # ChunkTracker interface & InMemoryChunkTracker
+│   │   │   └── session/                # Unified streaming transmission pipeline
+│   │   │       ├── ack.rs              # ACK/NACK frame handler, sliding window & RTT tracking
+│   │   │       ├── reader.rs           # Chunk reader task, BufferPool reuse & CRC combine
+│   │   │       └── mod.rs              # Session handshake, driver loop & finalization
 │   │   ├── transport/                  # USB (ADB), Wi-Fi Direct, multi-stream TCP, vectored I/O
+│   │   │   ├── usb/                    # Decoupled USB transport & ADB host process manager
+│   │   │   │   ├── adb.rs              # Isolated host CLI process controller (omitted on Android)
+│   │   │   │   ├── transport.rs        # Pure Transport trait implementation over ADB TCP tunnel
+│   │   │   │   └── mod.rs              # Module re-exports & tunnel helpers
+│   │   │   ├── stream.rs               # Generic async byte stream transport adapter
+│   │   │   ├── tcp.rs                  # High-performance TCP socket framing & buffer tuning
+│   │   │   ├── vectored.rs             # Vectored write_all_vectored framing engine
+│   │   │   └── wifi_direct.rs          # 5 GHz Local Hotspot & Wi-Fi Direct socket adapter
 │   │   ├── util/                       # Microsecond telemetry, storage security, Tokio runtime
+│   │   │   ├── storage.rs              # Path traversal security, preallocation, sequential read
+│   │   │   ├── runtime.rs              # Async Tokio task launcher bridge
+│   │   │   └── telemetry/              # Microsecond telemetry package
+│   │   │       ├── classifier.rs       # Automated bottleneck classification heuristics
+│   │   │       ├── exporter.rs         # JSON and human-readable .log timeline exporters
+│   │   │       ├── logger.rs           # Global telemetry registry & zero-leak Logcat subscriber
+│   │   │       ├── recorder.rs         # Atomic ring-buffer sampler & throughput tracker
+│   │   │       ├── types.rs            # Telemetry events, stages, metrics, bottleneck models
+│   │   │       └── mod.rs              # Telemetry re-exports & unit test matrix
 │   │   ├── turbotransfer_core.udl      # UniFFI interface definition
 │   │   └── uniffi_interface.rs         # Native UniFFI FFI exports & Tokio runtime bridge
 │   └── tests/                          # 14 integration test suites (86 automated tests)
@@ -117,7 +144,10 @@ TurboTransfer/
 │       └── wifi_direct_live_test.rs    # Live Wi-Fi Direct hardware loopback tests
 ├── tui/                                # Full 15-screen Ratatui Terminal User Interface
 │   ├── src/
-│   │   ├── app.rs                      # Decoupled TUI state & Transfer API client
+│   │   ├── app/                        # Decoupled TUI architecture (state vs actions)
+│   │   │   ├── actions.rs              # Transfer triggers, navigation, benchmark runners, settings
+│   │   │   ├── state.rs                # Pure UI data models, screens, tabs, file browser buffer
+│   │   │   └── mod.rs                  # Module facade & reachability unit test suite
 │   │   ├── config.rs                   # TurboSettings JSON configuration model
 │   │   ├── events.rs                   # Keyboard event dispatcher & global shortcuts
 │   │   ├── main.rs                     # Terminal setup, loop, panic & Ctrl+C safety hooks

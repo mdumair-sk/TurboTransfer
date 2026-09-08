@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use tempfile::tempdir;
-use tokio::time::{sleep, Duration};
 use turbotransfer_core::manifest::{
     coalesce_ranges, expand_ranges, MetaActor, TransferMeta, TransferRole,
     TransferStatus, TransportType,

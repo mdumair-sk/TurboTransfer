@@ -1,4 +1,8 @@
 pub mod api;
+pub mod discovery;
+pub mod receiver;
+pub mod registry;
+pub mod sender;
 pub mod session;
 pub mod tracker;
 

@@ -83,6 +83,7 @@ function Sync-SourceCode {
     $tarLine = "tar -czf - --exclude=target --exclude=.git --exclude=android/.gradle --exclude=android/build --exclude=android/app/build --exclude=received_files --exclude=*.apk --exclude=*.log -C `"$ProjectRoot`" core transport tui cli windows Cargo.toml Cargo.lock | ssh $sshStr localhost `"mkdir -p ~/turbotransfer; tar -xzf - -C ~/turbotransfer`""
 
     cmd.exe /c $tarLine
+    & ssh @sshArgs localhost "rm -f ~/turbotransfer/core/src/transfer/session.rs ~/turbotransfer/core/src/util/telemetry.rs ~/turbotransfer/core/src/transport/usb.rs" 2>$null
 
     $sw.Stop()
     Write-Host "  -> Synced in $($sw.ElapsedMilliseconds) ms" -ForegroundColor Green
