@@ -1,4 +1,4 @@
-use turbotransfer_core::protocol::{HeartbeatData, Message};
+use turbotransfer_core::protocol::{HelloData, Message};
 use turbotransfer_core::transport::usb::{UsbTransport, UsbTransportConfig};
 use turbotransfer_core::transport::{Transport, TransportKind, TransportStatus};
 
@@ -27,10 +27,14 @@ async fn test_live_usb_transport_end_to_end() {
     assert!(transport.is_connected());
     println!("  -> SUCCESS: UsbTransport connected! Serial: {:?}, Status: {}", transport.active_serial(), transport.status());
 
-    println!("\n[3/4] Transmitting Heartbeat frames over USB transport...");
+    println!("\n[3/4] Transmitting Hello frames over USB transport...");
     for i in 1..=5 {
-        let hb = Message::Heartbeat(HeartbeatData { sequence: i });
-        transport.send_frame(&hb).await.expect("Failed to send frame over USB");
+        let hello = Message::Hello(HelloData {
+            device_id: uuid::Uuid::nil(),
+            device_name: "LiveUsbTest".to_string(),
+            protocol_version: i,
+        });
+        transport.send_frame(&hello).await.expect("Failed to send frame over USB");
         println!("  -> Sent frame #{}, Total bytes sent: {}", i, transport.bytes_sent());
     }
     assert!(transport.bytes_sent() > 0);

@@ -89,20 +89,18 @@ pub fn render_main_menu(f: &mut Frame, app: &AppState, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("   • Scheduler:       ", Style::default().fg(Color::DarkGray)),
-            Span::styled(&app.settings.scheduling, Style::default().fg(Color::White)),
-            Span::styled(" (Rate-Adaptive)", Style::default().fg(Color::DarkGray)),
+            Span::styled("Rate-Adaptive AIMD", Style::default().fg(Color::White)),
+            Span::styled(" (Dynamic Multipath)", Style::default().fg(Color::DarkGray)),
         ]),
         Line::from(vec![
-            Span::styled("   • Chunk Size:      ", Style::default().fg(Color::DarkGray)),
-            Span::styled(format!("{} MiB", app.settings.chunk_size_mib), Style::default().fg(Color::White)),
-            Span::styled(" (xxHash64 frame / CRC32c verify)", Style::default().fg(Color::DarkGray)),
+            Span::styled("   • Chunk Sizing:    ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Dynamic 256K - 4M", Style::default().fg(Color::White)),
+            Span::styled(" (xxHash64 / CRC32c)", Style::default().fg(Color::DarkGray)),
         ]),
         Line::from(vec![
-            Span::styled("   • Buffer Pool:     ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                format!("{} buffers ({} MB bounded RAM)", app.settings.buffer_count, app.settings.buffer_count as u32 * app.settings.chunk_size_mib),
-                Style::default().fg(Color::White),
-            ),
+            Span::styled("   • Pipeline:        ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Zero-Copy Slices", Style::default().fg(Color::White)),
+            Span::styled(" (Recycled Ring)", Style::default().fg(Color::DarkGray)),
         ]),
         Line::from(""),
         Line::from(Span::styled("   NETWORK & TRANSPORT STATUS", Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD))),

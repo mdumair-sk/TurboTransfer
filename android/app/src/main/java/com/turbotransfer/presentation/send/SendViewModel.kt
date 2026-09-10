@@ -5,12 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.turbotransfer.core.common.Resource
 import com.turbotransfer.domain.model.SelectedFileInfo
 import com.turbotransfer.domain.model.TransferStatus
-import com.turbotransfer.domain.usecase.discovery.ObserveReceiverDiscoveryUseCase
-import com.turbotransfer.domain.usecase.hotspot.ObserveHotspotStateUseCase
-import com.turbotransfer.domain.usecase.hotspot.StartHotspotUseCase
-import com.turbotransfer.domain.usecase.hotspot.StopHotspotUseCase
-import com.turbotransfer.domain.usecase.transfer.ObserveTransferProgressUseCase
-import com.turbotransfer.domain.usecase.transfer.StartTransferUseCase
+import com.turbotransfer.data.repository.DiscoveryRepositoryImpl
+import com.turbotransfer.data.repository.HotspotRepositoryImpl
+import com.turbotransfer.data.repository.TransferRepositoryImpl
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
@@ -19,12 +16,9 @@ import javax.inject.Inject
 
 @HiltViewModel
 class SendViewModel @Inject constructor(
-    private val observeReceiverDiscoveryUseCase: ObserveReceiverDiscoveryUseCase,
-    private val observeHotspotStateUseCase: ObserveHotspotStateUseCase,
-    private val startHotspotUseCase: StartHotspotUseCase,
-    private val stopHotspotUseCase: StopHotspotUseCase,
-    private val startTransferUseCase: StartTransferUseCase,
-    private val observeTransferProgressUseCase: ObserveTransferProgressUseCase
+    private val discoveryRepository: DiscoveryRepositoryImpl,
+    private val hotspotRepository: HotspotRepositoryImpl,
+    private val transferRepository: TransferRepositoryImpl
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SendUiState())
@@ -35,7 +29,7 @@ class SendViewModel @Inject constructor(
     init {
         // Observe receiver discovery
         viewModelScope.launch {
-            observeReceiverDiscoveryUseCase().collect { receiver ->
+            discoveryRepository.observeReceiverDiscovery().collect { receiver ->
                 _uiState.update { current ->
                     val updatedAddress = if (receiver != null && (current.customAddress == "127.0.0.1:9876" || current.customAddress.isEmpty() || current.customAddress.contains("127.0.0.1"))) {
                         receiver.address
@@ -52,7 +46,7 @@ class SendViewModel @Inject constructor(
 
         // Observe hotspot state
         viewModelScope.launch {
-            observeHotspotStateUseCase().collect { hotspotState ->
+            hotspotRepository.hotspotStateFlow.collect { hotspotState ->
                 _uiState.update { it.copy(hotspotState = hotspotState) }
             }
         }
@@ -98,7 +92,7 @@ class SendViewModel @Inject constructor(
     fun toggleHotspot() {
         val active = _uiState.value.hotspotState.isActive
         if (!active) {
-            startHotspotUseCase { res ->
+            hotspotRepository.startHotspot(9876) { res ->
                 when (res) {
                     is Resource.Success -> _uiState.update { it.copy(userMessage = res.data) }
                     is Resource.Error -> _uiState.update { it.copy(userMessage = res.message) }
@@ -106,7 +100,7 @@ class SendViewModel @Inject constructor(
                 }
             }
         } else {
-            stopHotspotUseCase()
+            hotspotRepository.stopHotspot()
         }
     }
 
@@ -124,12 +118,12 @@ class SendViewModel @Inject constructor(
 
             while (_uiState.value.transferQueue.isNotEmpty()) {
                 val item = _uiState.value.transferQueue.first()
-                val res = startTransferUseCase(item.path, targetAddress, item.displayName)
+                val res = transferRepository.startTransfer(item.path, targetAddress, item.displayName)
                 when (res) {
                     is Resource.Success -> {
                         val transferId = res.data
                         // Await terminal status for this specific item before proceeding to the next
-                        val terminalProgress = observeTransferProgressUseCase(transferId)
+                        val terminalProgress = transferRepository.observeTransferProgress(transferId)
                             .filterNotNull()
                             .first { progress ->
                                 progress.status == TransferStatus.COMPLETED

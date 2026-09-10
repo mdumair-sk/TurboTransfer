@@ -80,10 +80,10 @@ function Sync-SourceCode {
     if (Test-Path $KeyPath) { $sshArgs += @("-i", $KeyPath) }
 
     $sshStr = $sshArgs -join ' '
-    $tarLine = "tar -czf - --exclude=target --exclude=.git --exclude=android/.gradle --exclude=android/build --exclude=android/app/build --exclude=received_files --exclude=*.apk --exclude=*.log -C `"$ProjectRoot`" core transport tui cli windows Cargo.toml Cargo.lock | ssh $sshStr localhost `"mkdir -p ~/turbotransfer; tar -xzf - -C ~/turbotransfer`""
+    $tarLine = "tar -czf - --exclude=target --exclude=.git --exclude=android/.gradle --exclude=android/build --exclude=android/app/build --exclude=received_files --exclude=*.apk --exclude=*.log -C `"$ProjectRoot`" core tui cli Cargo.toml Cargo.lock | ssh $sshStr localhost `"mkdir -p ~/turbotransfer; tar -xzf - -C ~/turbotransfer`""
 
     cmd.exe /c $tarLine
-    & ssh @sshArgs localhost "rm -f ~/turbotransfer/core/src/transfer/session.rs ~/turbotransfer/core/src/util/telemetry.rs ~/turbotransfer/core/src/transport/usb.rs" 2>$null
+    & ssh @sshArgs localhost "rm -rf ~/turbotransfer/transport ~/turbotransfer/windows ~/turbotransfer/core/tests/multipath_tests.rs ~/turbotransfer/core/src/scheduler/multipath.rs ~/turbotransfer/core/src/scheduler/metrics.rs ~/turbotransfer/core/src/scheduler/buffer_pool.rs ~/turbotransfer/core/src/transfer/session.rs ~/turbotransfer/core/src/util/telemetry.rs ~/turbotransfer/core/src/transport/usb.rs" 2>$null
 
     $sw.Stop()
     Write-Host "  -> Synced in $($sw.ElapsedMilliseconds) ms" -ForegroundColor Green

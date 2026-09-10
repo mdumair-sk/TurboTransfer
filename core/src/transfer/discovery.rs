@@ -102,6 +102,7 @@ pub fn get_devices() -> Vec<DeviceInfo> {
                     true
                 } else {
                     let _ = UsbTransport::setup_adb_forward(&d.serial, 9876, 9876);
+                    let _ = UsbTransport::setup_adb_forward(&d.serial, 9875, 9875);
                     if UsbTransport::is_receiver_listening(&d.serial, 9876) {
                         true
                     } else {
@@ -111,6 +112,41 @@ pub fn get_devices() -> Vec<DeviceInfo> {
                     }
                 };
 
+                #[cfg(target_os = "windows")]
+                let is_wifi_connected = {
+                    use std::net::{SocketAddr, TcpStream};
+                    use std::time::Duration;
+                    let mut wifi_ready = false;
+                    let addr = SocketAddr::from(([127, 0, 0, 1], 9875));
+                    if let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(50)) {
+                        use std::io::{BufRead, BufReader};
+                        let mut reader = BufReader::new(&mut stream);
+                        let mut line = String::new();
+                        if reader.read_line(&mut line).is_ok() {
+                            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
+                                if let (Some(ssid), Some(passphrase)) = (
+                                    val.get("ssid").and_then(|s| s.as_str()),
+                                    val.get("passphrase").and_then(|s| s.as_str()),
+                                ) {
+                                    if !ssid.is_empty() {
+                                        let cur_ssid = crate::transport::WifiDirectTransport::get_current_windows_wifi_ssid();
+                                        if cur_ssid.as_deref() == Some(ssid) {
+                                            wifi_ready = true;
+                                        } else {
+                                            let config = crate::transport::WifiDirectConfig::new(ssid, passphrase, "", 9876);
+                                            let _ = crate::transport::WifiDirectTransport::associate_wlan_windows_sync(&config);
+                                            wifi_ready = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    wifi_ready
+                };
+                #[cfg(not(target_os = "windows"))]
+                let is_wifi_connected = false;
+
                 let name = if let Some(model) = &d.model {
                     format!("Android Phone: {} ({})", model, d.serial)
                 } else if let Some(prod) = &d.product {
@@ -119,7 +155,9 @@ pub fn get_devices() -> Vec<DeviceInfo> {
                     format!("Android ADB Device ({})", d.serial)
                 };
 
-                let transport_desc = if is_listening {
+                let transport_desc = if is_wifi_connected {
+                    "USB + 5 GHz Wi-Fi (Connected)".to_string()
+                } else if is_listening {
                     "USB (Ready to Receive)".to_string()
                 } else {
                     "USB (ADB Connected)".to_string()

@@ -129,7 +129,8 @@ pub async fn resolve_and_connect_transports_with_streams(
 
     match transport_pref {
         TransportPreference::UsbOnly => {
-            if let Ok(t) = TcpTransport::connect(addr).await {
+            let clean_addr = addr.split(['#', '?']).next().unwrap_or(addr).trim();
+            if let Ok(t) = TcpTransport::connect(clean_addr).await {
                 transports.push((Box::new(t), true));
                 transport_names.push("USB (ADB Tunnel)".to_string());
             } else {
@@ -190,64 +191,42 @@ pub async fn resolve_and_connect_transports_with_streams(
             let mut wifi_connected = false;
 
             if let Some(explicit_addr) = address {
-                if explicit_addr.contains(',') {
-                    for single_addr in explicit_addr.split(',') {
-                        let trimmed = single_addr.trim();
-                        if !trimmed.is_empty() {
-                            let is_usb = trimmed.contains("127.0.0.1")
-                                || trimmed.contains("localhost")
-                                || trimmed.contains("usb")
-                                || trimmed.starts_with("10.125.")
-                                || trimmed.starts_with("192.168.42.");
-                            if is_usb && !usb_connected {
-                                let is_adb_tunnel = trimmed.contains("127.0.0.1")
-                                    || trimmed.contains("localhost");
-                                let usb_stream_count = if is_adb_tunnel { 1 } else { 2 };
-                                for s_idx in 1..=usb_stream_count {
-                                    if let Ok(t) = TcpTransport::connect(trimmed).await {
-                                        transports.push((Box::new(t), true));
-                                        let label = if is_adb_tunnel {
-                                            "USB (ADB Tunnel)".to_string()
-                                        } else {
-                                            format!("USB (RNDIS Stream #{})", s_idx)
-                                        };
-                                        transport_names.push(label);
-                                        usb_connected = true;
-                                    }
-                                }
-                            } else if !is_usb {
-                                for stream_idx in 1..=stream_count {
-                                    if let Ok(t) = TcpTransport::connect(trimmed).await {
-                                        transports.push((Box::new(t), false));
-                                        transport_names.push(format!(
-                                            "5 GHz Wi-Fi Direct (Stream #{})",
-                                            stream_idx
-                                        ));
-                                        wifi_connected = true;
-                                    }
+                for single_addr in explicit_addr.split(',') {
+                    let trimmed = single_addr.trim();
+                    if !trimmed.is_empty() {
+                        let is_usb = trimmed.contains("127.0.0.1")
+                            || trimmed.contains("localhost")
+                            || trimmed.to_lowercase().contains("usb")
+                            || trimmed.starts_with("10.125.")
+                            || trimmed.starts_with("10.104.")
+                            || trimmed.starts_with("192.168.42.");
+                        let clean_addr = trimmed.split(['#', '?']).next().unwrap_or(trimmed).trim();
+                        if is_usb {
+                            let is_adb_tunnel = clean_addr.contains("127.0.0.1")
+                                || clean_addr.contains("localhost");
+                            let usb_stream_count = if is_adb_tunnel { 1 } else { 2 };
+                            for s_idx in 1..=usb_stream_count {
+                                if let Ok(t) = TcpTransport::connect(clean_addr).await {
+                                    transports.push((Box::new(t), true));
+                                    let label = if is_adb_tunnel {
+                                        "USB (ADB Tunnel)".to_string()
+                                    } else {
+                                        format!("USB (RNDIS Stream #{})", s_idx)
+                                    };
+                                    transport_names.push(label);
+                                    usb_connected = true;
                                 }
                             }
-                        }
-                    }
-                } else {
-                    let is_usb = explicit_addr.contains("127.0.0.1")
-                        || explicit_addr.contains("localhost")
-                        || explicit_addr.contains("usb");
-                    if is_usb {
-                        if let Ok(t) = TcpTransport::connect(explicit_addr).await {
-                            transports.push((Box::new(t), true));
-                            transport_names.push("USB (ADB Tunnel)".to_string());
-                            usb_connected = true;
-                        }
-                    } else {
-                        for stream_idx in 1..=stream_count {
-                            if let Ok(t) = TcpTransport::connect(explicit_addr).await {
-                                transports.push((Box::new(t), false));
-                                transport_names.push(format!(
-                                    "5 GHz Wi-Fi Direct (Stream #{})",
-                                    stream_idx
-                                ));
-                                wifi_connected = true;
+                        } else {
+                            for stream_idx in 1..=stream_count {
+                                if let Ok(t) = TcpTransport::connect(clean_addr).await {
+                                    transports.push((Box::new(t), false));
+                                    transport_names.push(format!(
+                                        "5 GHz Wi-Fi Direct (Stream #{})",
+                                        stream_idx
+                                    ));
+                                    wifi_connected = true;
+                                }
                             }
                         }
                     }
@@ -270,7 +249,7 @@ pub async fn resolve_and_connect_transports_with_streams(
 
             // 2. Connect Wi-Fi Direct channel with bonded sockets if not already connected
             let is_explicit_loopback = address
-                .map(|a| a.contains("127.0.0.1") || a.contains("localhost"))
+                .map(|a| a.contains("127.0.0.1") || a.contains("localhost") || a.to_lowercase().contains("usb"))
                 .unwrap_or(false);
             if !wifi_connected && !is_explicit_loopback {
                 let probe_ips = get_windows_hotspot_probe_ips();
@@ -309,68 +288,40 @@ pub async fn resolve_and_connect_transports_with_streams(
         }
         TransportPreference::Automatic => {
             if let Some(explicit_addr) = address {
-                if explicit_addr.contains(',') {
-                    for single_addr in explicit_addr.split(',') {
-                        let trimmed = single_addr.trim();
-                        if !trimmed.is_empty() {
-                            let is_usb = trimmed.contains("127.0.0.1")
-                                || trimmed.contains("localhost")
-                                || trimmed.contains("usb");
-                            if is_usb {
-                                if let Ok(Ok(t)) = tokio::time::timeout(
-                                    tokio::time::Duration::from_millis(800),
-                                    TcpTransport::connect(trimmed),
-                                )
-                                .await
-                                {
-                                    transports.push((Box::new(t), true));
-                                    transport_names.push("USB (ADB Tunnel)".to_string());
-                                }
-                            } else {
-                                for stream_idx in 1..=stream_count {
-                                    if let Ok(Ok(t)) = tokio::time::timeout(
-                                        tokio::time::Duration::from_millis(800),
-                                        TcpTransport::connect(trimmed),
-                                    )
-                                    .await
-                                    {
-                                        transports.push((Box::new(t), false));
-                                        transport_names.push(format!(
-                                            "5 GHz Wi-Fi Direct (Stream #{})",
-                                            stream_idx
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    let is_usb = explicit_addr.contains("127.0.0.1")
-                        || explicit_addr.contains("localhost")
-                        || explicit_addr.contains("usb");
-                    if is_usb {
-                        if let Ok(Ok(t)) = tokio::time::timeout(
-                            tokio::time::Duration::from_millis(800),
-                            TcpTransport::connect(explicit_addr),
-                        )
-                        .await
-                        {
-                            transports.push((Box::new(t), true));
-                            transport_names.push("USB (ADB Tunnel)".to_string());
-                        }
-                    } else {
-                        for stream_idx in 1..=stream_count {
+                for single_addr in explicit_addr.split(',') {
+                    let trimmed = single_addr.trim();
+                    if !trimmed.is_empty() {
+                        let is_usb = trimmed.contains("127.0.0.1")
+                            || trimmed.contains("localhost")
+                            || trimmed.to_lowercase().contains("usb")
+                            || trimmed.starts_with("10.125.")
+                            || trimmed.starts_with("10.104.")
+                            || trimmed.starts_with("192.168.42.");
+                        let clean_addr = trimmed.split(['#', '?']).next().unwrap_or(trimmed).trim();
+                        if is_usb {
                             if let Ok(Ok(t)) = tokio::time::timeout(
                                 tokio::time::Duration::from_millis(800),
-                                TcpTransport::connect(explicit_addr),
+                                TcpTransport::connect(clean_addr),
                             )
                             .await
                             {
-                                transports.push((Box::new(t), false));
-                                transport_names.push(format!(
-                                    "5 GHz Wi-Fi Direct (Stream #{})",
-                                    stream_idx
-                                ));
+                                transports.push((Box::new(t), true));
+                                transport_names.push("USB (ADB Tunnel)".to_string());
+                            }
+                        } else {
+                            for stream_idx in 1..=stream_count {
+                                if let Ok(Ok(t)) = tokio::time::timeout(
+                                    tokio::time::Duration::from_millis(800),
+                                    TcpTransport::connect(clean_addr),
+                                )
+                                .await
+                                {
+                                    transports.push((Box::new(t), false));
+                                    transport_names.push(format!(
+                                        "5 GHz Wi-Fi Direct (Stream #{})",
+                                        stream_idx
+                                    ));
+                                }
                             }
                         }
                     }

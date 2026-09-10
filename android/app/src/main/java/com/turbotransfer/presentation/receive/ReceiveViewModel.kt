@@ -3,17 +3,10 @@ package com.turbotransfer.presentation.receive
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.turbotransfer.core.common.Resource
-import com.turbotransfer.domain.usecase.discovery.GetNetworkStatusUseCase
-import com.turbotransfer.domain.usecase.hotspot.ObserveHotspotStateUseCase
-import com.turbotransfer.domain.usecase.hotspot.StartHotspotUseCase
-import com.turbotransfer.domain.usecase.hotspot.StopHotspotUseCase
-import com.turbotransfer.domain.usecase.settings.GetSettingsUseCase
-import com.turbotransfer.domain.usecase.settings.UpdateSettingsUseCase
-import com.turbotransfer.domain.usecase.transfer.EnterReceiveModeUseCase
-import com.turbotransfer.domain.usecase.transfer.ObserveActiveTransferUseCase
-import com.turbotransfer.domain.usecase.transfer.ObserveReceiveListeningUseCase
-import com.turbotransfer.domain.usecase.transfer.ObserveReceiveStatusUseCase
-import com.turbotransfer.domain.usecase.transfer.StopReceiveModeUseCase
+import com.turbotransfer.data.repository.DiscoveryRepositoryImpl
+import com.turbotransfer.data.repository.HotspotRepositoryImpl
+import com.turbotransfer.data.repository.SettingsRepositoryImpl
+import com.turbotransfer.data.repository.TransferRepositoryImpl
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -22,17 +15,10 @@ import javax.inject.Inject
 
 @HiltViewModel
 class ReceiveViewModel @Inject constructor(
-    private val enterReceiveModeUseCase: EnterReceiveModeUseCase,
-    private val stopReceiveModeUseCase: StopReceiveModeUseCase,
-    private val observeReceiveListeningUseCase: ObserveReceiveListeningUseCase,
-    private val observeReceiveStatusUseCase: ObserveReceiveStatusUseCase,
-    private val observeActiveTransferUseCase: ObserveActiveTransferUseCase,
-    private val observeHotspotStateUseCase: ObserveHotspotStateUseCase,
-    private val startHotspotUseCase: StartHotspotUseCase,
-    private val stopHotspotUseCase: StopHotspotUseCase,
-    private val getNetworkStatusUseCase: GetNetworkStatusUseCase,
-    private val getSettingsUseCase: GetSettingsUseCase,
-    private val updateSettingsUseCase: UpdateSettingsUseCase
+    private val transferRepository: TransferRepositoryImpl,
+    private val hotspotRepository: HotspotRepositoryImpl,
+    private val discoveryRepository: DiscoveryRepositoryImpl,
+    private val settingsRepository: SettingsRepositoryImpl
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReceiveUiState())
@@ -41,31 +27,31 @@ class ReceiveViewModel @Inject constructor(
     init {
         _uiState.update {
             it.copy(
-                destDir = getSettingsUseCase.getReceiveDestDir()
+                destDir = settingsRepository.getReceiveDestDir()
             )
         }
 
         // Observe receiver listening state & status from repository
         viewModelScope.launch {
-            observeReceiveListeningUseCase().collect { isListening ->
+            transferRepository.isListeningFlow.collect { isListening ->
                 _uiState.update { it.copy(isListening = isListening) }
             }
         }
         viewModelScope.launch {
-            observeReceiveStatusUseCase().collect { status ->
+            transferRepository.receiveStatusFlow.collect { status ->
                 _uiState.update { it.copy(statusText = status) }
             }
         }
         // Observe hotspot state
         viewModelScope.launch {
-            observeHotspotStateUseCase().collect { hotspotState ->
+            hotspotRepository.hotspotStateFlow.collect { hotspotState ->
                 _uiState.update { it.copy(hotspotState = hotspotState) }
             }
         }
 
         // Observe active incoming transfer
         viewModelScope.launch {
-            observeActiveTransferUseCase().collect { session ->
+            transferRepository.activeSessionFlow.collect { session ->
                 _uiState.update { it.copy(activeIncomingSession = if (session?.isOutgoing == false) session else null) }
             }
         }
@@ -74,7 +60,7 @@ class ReceiveViewModel @Inject constructor(
         viewModelScope.launch {
             var previousUsb = false
             while (true) {
-                val (usb, ips) = getNetworkStatusUseCase()
+                val (usb, ips) = discoveryRepository.getNetworkInterfacesAndUsb()
                 val usbNewlyConnected = usb && !previousUsb
                 previousUsb = usb
                 _uiState.update { current ->
@@ -92,7 +78,7 @@ class ReceiveViewModel @Inject constructor(
     }
 
     fun setDestinationDir(path: String) {
-        updateSettingsUseCase.setReceiveDestDir(path)
+        settingsRepository.setReceiveDestDir(path)
         _uiState.update { it.copy(destDir = path) }
     }
 
@@ -103,7 +89,7 @@ class ReceiveViewModel @Inject constructor(
     fun toggleHotspot() {
         val active = _uiState.value.hotspotState.isActive
         if (!active) {
-            startHotspotUseCase { res ->
+            hotspotRepository.startHotspot(9876) { res ->
                 when (res) {
                     is Resource.Success -> _uiState.update { it.copy(userMessage = res.data) }
                     is Resource.Error -> _uiState.update { it.copy(userMessage = res.message) }
@@ -111,7 +97,7 @@ class ReceiveViewModel @Inject constructor(
                 }
             }
         } else {
-            stopHotspotUseCase()
+            hotspotRepository.stopHotspot()
         }
     }
 
@@ -119,10 +105,13 @@ class ReceiveViewModel @Inject constructor(
         viewModelScope.launch {
             if (!_uiState.value.isListening) {
                 val dest = _uiState.value.destDir
-                val res = enterReceiveModeUseCase(dest, address)
+                val res = transferRepository.enterReceiveMode(dest, address)
                 when (res) {
                     is Resource.Success -> {
                         _uiState.update { it.copy(isListening = true, statusText = res.data) }
+                        if (!_uiState.value.hotspotState.isActive) {
+                            hotspotRepository.startHotspot(9876) { }
+                        }
                     }
                     is Resource.Error -> {
                         _uiState.update { it.copy(isListening = false, statusText = "Error: ${res.message}", userMessage = res.message) }
@@ -130,7 +119,7 @@ class ReceiveViewModel @Inject constructor(
                     is Resource.Loading -> {}
                 }
             } else {
-                stopReceiveModeUseCase()
+                transferRepository.stopReceiveMode()
                 _uiState.update { it.copy(isListening = false, statusText = "Receive listener stopped") }
             }
         }

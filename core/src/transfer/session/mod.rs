@@ -417,7 +417,7 @@ pub async fn send_file_session_multipath_ext(
 
     let mut worker_handles = Vec::new();
     let global_notify = std::sync::Arc::new(tokio::sync::Notify::new());
-
+    let total_transports = transports.len();
     for (idx, (transport, is_usb)) in transports.into_iter().enumerate() {
         let (writer, reader) = transport.split_boxed()?;
         let prepared_rx = prepared_rx.clone();
@@ -433,7 +433,11 @@ pub async fn send_file_session_multipath_ext(
         let total_chunks = plan.len();
         let telemetry_worker = Some(telemetry.clone());
         let channel_name = if is_usb {
-            "USB".to_string()
+            if total_transports > 1 {
+                format!("USB-Stream-{}", idx + 1)
+            } else {
+                "USB".to_string()
+            }
         } else {
             format!("WiFi-Stream-{}", idx + 1)
         };
@@ -879,16 +883,15 @@ where
 
 /// Runs the receiver side of a transfer session over any generic `Transport` (§6, §7, §8, §9).
 /// Uses a persistent open file handle across all chunk writes to eliminate I/O reopening overhead.
-pub async fn receive_file_session<T, Tr>(
+pub async fn receive_file_session<T>(
     receiver_device_id: Uuid,
     receiver_device_name: &str,
     dest_dir: &Path,
-    tracker: &mut Tr,
+    tracker: &mut ChunkTracker,
     mut transport: T,
 ) -> Result<PathBuf, TransferSessionError>
 where
     T: Transport,
-    Tr: ChunkTracker,
 {
     // 1. Await Sender Hello
     let sender_hello = transport
@@ -997,7 +1000,12 @@ where
         let frame = match frame_msg {
             Some(f) => f,
             None => {
-                telemetry.record_channel_disconnect("Receiver", "Peer disconnected / EOF");
+                let is_done = chunks_completed >= offer.total_chunks;
+                if is_done {
+                    log::debug!("Receiver channel closed gracefully after transfer completion");
+                } else {
+                    telemetry.record_channel_disconnect("Receiver", "Peer disconnected / EOF");
+                }
                 break;
             }
         };
@@ -1187,12 +1195,6 @@ where
                 let _ = std::fs::remove_file(&part_path);
                 return Err(TransferSessionError::Cancelled);
             }
-            Message::Heartbeat(hb) => {
-                let reply = Message::Heartbeat(crate::protocol::HeartbeatData {
-                    sequence: hb.sequence + 1,
-                });
-                transport.send_frame(&reply).await?;
-            }
             _ => {}
         }
     }
@@ -1201,16 +1203,15 @@ where
 }
 
 /// Convenience wrapper running `receive_file_session` over a raw asynchronous stream.
-pub async fn receive_file_session_stream<S, Tr>(
+pub async fn receive_file_session_stream<S>(
     receiver_device_id: Uuid,
     receiver_device_name: &str,
     dest_dir: &Path,
-    tracker: &mut Tr,
+    tracker: &mut ChunkTracker,
     stream: S,
 ) -> Result<PathBuf, TransferSessionError>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
-    Tr: ChunkTracker,
 {
     receive_file_session(
         receiver_device_id,

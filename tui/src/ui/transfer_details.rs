@@ -55,7 +55,7 @@ pub fn render_transfer_details(f: &mut Frame, app: &AppState, area: Rect) {
         Line::from(vec![
             Span::styled("   Chunk Size:             ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                format!("{} MiB ({} bytes per chunk)", app.settings.chunk_size_mib, (app.settings.chunk_size_mib as usize * 1024 * 1024)),
+                "Dynamic (Auto-tuned per file size)",
                 Style::default().fg(Color::White),
             ),
         ]),

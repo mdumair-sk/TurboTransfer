@@ -32,8 +32,6 @@ pub struct UsbTransportConfig {
     pub write_timeout: Duration,
     /// Reconnect polling interval (default 2 seconds per TRD §8).
     pub reconnect_interval: Duration,
-    /// Socket read timeout before health check / heartbeat ping is sent.
-    pub heartbeat_interval: Duration,
 }
 
 impl Default for UsbTransportConfig {
@@ -45,7 +43,6 @@ impl Default for UsbTransportConfig {
             handshake_timeout: Duration::from_secs(5),
             write_timeout: Duration::from_secs(10),
             reconnect_interval: Duration::from_secs(2),
-            heartbeat_interval: Duration::from_secs(5),
         }
     }
 }

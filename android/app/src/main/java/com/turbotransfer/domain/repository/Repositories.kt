@@ -1,0 +1,13 @@
+package com.turbotransfer.domain.repository
+
+import com.turbotransfer.data.repository.DiscoveryRepositoryImpl
+import com.turbotransfer.data.repository.HistoryRepositoryImpl
+import com.turbotransfer.data.repository.HotspotRepositoryImpl
+import com.turbotransfer.data.repository.SettingsRepositoryImpl
+import com.turbotransfer.data.repository.TransferRepositoryImpl
+
+typealias TransferRepository = TransferRepositoryImpl
+typealias DiscoveryRepository = DiscoveryRepositoryImpl
+typealias HotspotRepository = HotspotRepositoryImpl
+typealias SettingsRepository = SettingsRepositoryImpl
+typealias HistoryRepository = HistoryRepositoryImpl

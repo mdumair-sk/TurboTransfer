@@ -5,12 +5,6 @@ import com.turbotransfer.domain.model.*
 import com.turbotransfer.domain.repository.DiscoveryRepository
 import com.turbotransfer.domain.repository.HotspotRepository
 import com.turbotransfer.domain.repository.TransferRepository
-import com.turbotransfer.domain.usecase.discovery.ObserveReceiverDiscoveryUseCase
-import com.turbotransfer.domain.usecase.hotspot.ObserveHotspotStateUseCase
-import com.turbotransfer.domain.usecase.hotspot.StartHotspotUseCase
-import com.turbotransfer.domain.usecase.hotspot.StopHotspotUseCase
-import com.turbotransfer.domain.usecase.transfer.ObserveTransferProgressUseCase
-import com.turbotransfer.domain.usecase.transfer.StartTransferUseCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -33,13 +27,13 @@ class SendViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
 
-    private class FakeDiscoveryRepository : DiscoveryRepository {
+    private class FakeDiscoveryRepository : DiscoveryRepository() {
         private val _flow = MutableStateFlow<DiscoveredReceiverInfo?>(null)
         override fun observeReceiverDiscovery(): Flow<DiscoveredReceiverInfo?> = _flow.asStateFlow()
         override suspend fun getNetworkInterfacesAndUsb(): Pair<Boolean, List<String>> = Pair(false, emptyList())
     }
 
-    private class FakeHotspotRepository : HotspotRepository {
+    private class FakeHotspotRepository : HotspotRepository() {
         private val _flow = MutableStateFlow(HotspotStateInfo())
         override val hotspotStateFlow: StateFlow<HotspotStateInfo> = _flow.asStateFlow()
         override fun startHotspot(port: Int, onResult: (Resource<String>) -> Unit) {
@@ -49,7 +43,7 @@ class SendViewModelTest {
         override fun cleanup() {}
     }
 
-    private class FakeTransferRepository : TransferRepository {
+    private class FakeTransferRepository : TransferRepository() {
         override val activeSessionFlow = MutableStateFlow<TransferSession?>(null)
         override val isListeningFlow = MutableStateFlow(false)
         override val receiveStatusFlow = MutableStateFlow("Idle")
@@ -100,12 +94,9 @@ class SendViewModelTest {
         fakeTransferRepo = FakeTransferRepository()
 
         viewModel = SendViewModel(
-            observeReceiverDiscoveryUseCase = ObserveReceiverDiscoveryUseCase(fakeDiscoveryRepo),
-            observeHotspotStateUseCase = ObserveHotspotStateUseCase(fakeHotspotRepo),
-            startHotspotUseCase = StartHotspotUseCase(fakeHotspotRepo),
-            stopHotspotUseCase = StopHotspotUseCase(fakeHotspotRepo),
-            startTransferUseCase = StartTransferUseCase(fakeTransferRepo),
-            observeTransferProgressUseCase = ObserveTransferProgressUseCase(fakeTransferRepo)
+            discoveryRepository = fakeDiscoveryRepo,
+            hotspotRepository = fakeHotspotRepo,
+            transferRepository = fakeTransferRepo
         )
     }
 

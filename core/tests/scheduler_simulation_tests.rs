@@ -223,16 +223,16 @@ fn test_completion_prediction_accuracy() {
 
     for i in 0..20 {
         let pred_us = model.estimate_completion_time_us(&tracker, chunk_size as usize);
-        model.record_prediction(i, pred_us);
         tracker.record_chunk_sent(i, chunk_size);
 
         // Actual turnaround ~50ms
         simulate_chunk_ack(&mut tracker, &mut model, i, chunk_size, 50_000, 1_000, Some(1_000));
-    }
 
-    let (p50_err, p95_err, _mae) = model.prediction_error_stats();
-    assert!(p50_err < 40.0, "P50 prediction error should be < 40% after convergence, got {:.1}%", p50_err);
-    assert!(p95_err < 70.0, "P95 prediction error should be < 70%, got {:.1}%", p95_err);
+        if i >= 10 {
+            // After convergence, prediction should be within reasonable bounds of 50ms (30ms - 80ms)
+            assert!(pred_us >= 30_000 && pred_us <= 80_000, "Estimated time {} us should be ~50ms", pred_us);
+        }
+    }
 }
 
 /// Test 9: Channel Count Scaling Performance (1, 2, 4, 8, 16 channels).

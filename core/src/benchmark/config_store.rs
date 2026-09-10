@@ -1,6 +1,5 @@
 use chrono::Utc;
-use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::fs;
 use std::path::PathBuf;
 
 use super::types::{SavedCalibrationConfig, TransferConfigOverride};
@@ -41,9 +40,7 @@ pub fn save_calibration(
     };
     let json = serde_json::to_string_pretty(&saved)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    let mut file = File::create(path)?;
-    file.write_all(json.as_bytes())?;
-    file.flush()?;
+    fs::write(path, json)?;
     Ok(())
 }
 
@@ -53,9 +50,7 @@ pub fn get_saved_calibration(peer_id: &str) -> Option<SavedCalibrationConfig> {
     if !path.exists() {
         return None;
     }
-    let mut file = File::open(path).ok()?;
-    let mut contents = String::new();
-    file.read_to_string(&mut contents).ok()?;
+    let contents = fs::read_to_string(path).ok()?;
     serde_json::from_str(&contents).ok()
 }
 

@@ -99,6 +99,42 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        handleIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        when (intent?.action) {
+            "com.turbotransfer.START_HOTSPOT" -> {
+                Log.d("TurboTransfer", "Intent action received: START_HOTSPOT")
+                mainViewModel.handleStartHotspotBroadcast()
+            }
+            "com.turbotransfer.STOP_HOTSPOT" -> {
+                Log.d("TurboTransfer", "Intent action received: STOP_HOTSPOT")
+                mainViewModel.handleStopHotspotBroadcast()
+            }
+            "com.turbotransfer.ENTER_RECEIVE" -> {
+                val dest = intent.getStringExtra("dest_dir")
+                Log.d("TurboTransfer", "Intent action received: ENTER_RECEIVE dest=$dest")
+                mainViewModel.handleEnterReceiveBroadcast(dest)
+            }
+            "com.turbotransfer.STOP_RECEIVE" -> {
+                Log.d("TurboTransfer", "Intent action received: STOP_RECEIVE")
+                mainViewModel.handleStopReceiveBroadcast()
+            }
+            "com.turbotransfer.START_TRANSFER" -> {
+                val path = intent.getStringExtra("file_path") ?: return
+                val address = intent.getStringExtra("address") ?: "127.0.0.1:9876"
+                Log.d("TurboTransfer", "Intent action received: START_TRANSFER path=$path, address=$address")
+                mainViewModel.handleStartTransferBroadcast(path, address)
+            }
+        }
     }
 
     private fun requestRequiredPermissions() {

@@ -1217,7 +1217,7 @@ dependencies = [
 
 [[package]]
 name = "turbotransfer-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "clap",
  "serde_json",
@@ -1228,7 +1228,7 @@ dependencies = [
 
 [[package]]
 name = "turbotransfer-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -1254,22 +1254,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "turbotransfer-transport-usb"
-version = "0.2.0"
-dependencies = [
- "turbotransfer-core",
-]
-
-[[package]]
-name = "turbotransfer-transport-wifi-direct"
-version = "0.2.0"
-dependencies = [
- "turbotransfer-core",
-]
-
-[[package]]
 name = "turbotransfer-tui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "crossterm",
  "ratatui",
@@ -1279,13 +1265,6 @@ dependencies = [
  "tokio",
  "turbotransfer-core",
  "uuid",
-]
-
-[[package]]
-name = "turbotransfer-windows"
-version = "0.2.0"
-dependencies = [
- "turbotransfer-core",
 ]
 
 [[package]]

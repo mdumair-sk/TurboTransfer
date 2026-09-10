@@ -221,9 +221,9 @@ pub fn render_transfer_screen(f: &mut Frame, app: &AppState, area: Rect) {
             Line::from(""),
             Line::from(vec![
                 Span::styled("   Scheduler:       ", Style::default().fg(Color::DarkGray)),
-                Span::styled(&app.settings.scheduling, Style::default().fg(Color::White)),
-                Span::styled("  │  Buffer Pool: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(format!("{} buffers (bounded RAM)", app.settings.buffer_count), Style::default().fg(Color::White)),
+                Span::styled("Rate-Adaptive", Style::default().fg(Color::White)),
+                Span::styled("  │  Pipeline: ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Zero-Copy Slices", Style::default().fg(Color::White)),
             ]),
             Line::from(""),
             Line::from(vec![

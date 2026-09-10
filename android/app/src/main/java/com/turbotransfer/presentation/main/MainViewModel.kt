@@ -5,15 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.turbotransfer.domain.model.TransferProgressInfo
 import com.turbotransfer.domain.model.TransferSession
 import com.turbotransfer.domain.model.TransferStatus
-import com.turbotransfer.domain.usecase.hotspot.StartHotspotUseCase
-import com.turbotransfer.domain.usecase.hotspot.StopHotspotUseCase
-import com.turbotransfer.domain.usecase.transfer.EnterReceiveModeUseCase
-import com.turbotransfer.domain.usecase.transfer.ObserveActiveTransferUseCase
-import com.turbotransfer.domain.usecase.transfer.ObserveTransferProgressUseCase
-import com.turbotransfer.domain.usecase.transfer.PollIncomingTransferUseCase
-import com.turbotransfer.domain.usecase.transfer.StartTransferUseCase
-import com.turbotransfer.domain.usecase.transfer.StopReceiveModeUseCase
-import com.turbotransfer.domain.usecase.settings.GetSettingsUseCase
+import com.turbotransfer.data.repository.HotspotRepositoryImpl
+import com.turbotransfer.data.repository.SettingsRepositoryImpl
+import com.turbotransfer.data.repository.TransferRepositoryImpl
 import dagger.hilt.android.lifecycle.HiltViewModel
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -25,21 +19,15 @@ import javax.inject.Inject
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
-    private val observeActiveTransferUseCase: ObserveActiveTransferUseCase,
-    private val observeTransferProgressUseCase: ObserveTransferProgressUseCase,
-    private val startTransferUseCase: StartTransferUseCase,
-    private val enterReceiveModeUseCase: EnterReceiveModeUseCase,
-    private val stopReceiveModeUseCase: StopReceiveModeUseCase,
-    private val startHotspotUseCase: StartHotspotUseCase,
-    private val stopHotspotUseCase: StopHotspotUseCase,
-    private val pollIncomingTransferUseCase: PollIncomingTransferUseCase,
-    private val getSettingsUseCase: GetSettingsUseCase
+    private val transferRepository: TransferRepositoryImpl,
+    private val hotspotRepository: HotspotRepositoryImpl,
+    private val settingsRepository: SettingsRepositoryImpl
 ) : ViewModel() {
 
     private val _selectedTab = MutableStateFlow(0)
     val selectedTab: StateFlow<Int> = _selectedTab.asStateFlow()
 
-    val activeSession: StateFlow<TransferSession?> = observeActiveTransferUseCase()
+    val activeSession: StateFlow<TransferSession?> = transferRepository.activeSessionFlow
 
     private val _currentProgress = MutableStateFlow<TransferProgressInfo?>(null)
     val currentProgress: StateFlow<TransferProgressInfo?> = _currentProgress.asStateFlow()
@@ -49,7 +37,7 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             activeSession.collectLatest { session ->
                 if (session != null) {
-                    observeTransferProgressUseCase(session.transferId).collect { progress ->
+                    transferRepository.observeTransferProgress(session.transferId).collect { progress ->
                         _currentProgress.value = progress
                     }
                 } else {
@@ -69,8 +57,8 @@ class MainViewModel @Inject constructor(
 
                 if (isIdleOrDone) {
                     val prevSessionId = activeSession.value?.transferId
-                    val saveDir = getSettingsUseCase.getReceiveDestDir()
-                    val incoming = pollIncomingTransferUseCase(saveDir)
+                    val saveDir = settingsRepository.getReceiveDestDir()
+                    val incoming = transferRepository.pollPendingIncomingTransfer(saveDir)
                     if (incoming != null && incoming.transferId != prevSessionId) {
                         _selectedTab.value = 2 // Auto-switch to transfer dashboard
                     }
@@ -86,30 +74,31 @@ class MainViewModel @Inject constructor(
 
     fun handleStartTransferBroadcast(filePath: String, address: String) {
         viewModelScope.launch {
-            startTransferUseCase(filePath, address)
+            transferRepository.startTransfer(filePath, address, null)
             _selectedTab.value = 2
         }
     }
 
     fun handleStartHotspotBroadcast() {
-        startHotspotUseCase { }
+        hotspotRepository.startHotspot(9876) { }
     }
 
     fun handleStopHotspotBroadcast() {
-        stopHotspotUseCase()
+        hotspotRepository.stopHotspot()
     }
 
     fun handleEnterReceiveBroadcast(destDir: String?) {
         viewModelScope.launch {
-            val dir = destDir ?: getSettingsUseCase.getReceiveDestDir()
-            enterReceiveModeUseCase(dir, null)
+            val dir = destDir ?: settingsRepository.getReceiveDestDir()
+            transferRepository.enterReceiveMode(dir, null)
+            hotspotRepository.startHotspot(9876) { }
             _selectedTab.value = 1
         }
     }
 
     fun handleStopReceiveBroadcast() {
         viewModelScope.launch {
-            stopReceiveModeUseCase()
+            transferRepository.stopReceiveMode()
         }
     }
 

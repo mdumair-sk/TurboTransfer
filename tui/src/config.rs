@@ -5,24 +5,12 @@ use turbotransfer_core::transfer::default_data_dir;
 /// Persisted configuration settings for TurboTransfer per TRD §12.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurboSettings {
-    /// Chunk size in MiB (16, 32, 64, 128, 256). Default 64 MiB.
-    pub chunk_size_mib: u32,
-    /// Bounded buffer pool count (4, 8, 16). Default 8.
-    pub buffer_count: u32,
-    /// Scheduler policy ("Adaptive", "Balanced"). Default "Adaptive".
-    pub scheduling: String,
     /// Default transport preference ("Automatic", "Combined", "USB only", "Wi-Fi Direct only").
     pub transport_pref: String,
     /// Download directory for incoming files.
     pub download_dir: String,
     /// Wi-Fi Direct frequency band ("5 GHz (Primary)", "2.4 GHz (Fallback)").
     pub p2p_band: String,
-    /// Max in-flight chunks per transport (default 4).
-    pub in_flight_per_transport: usize,
-    /// OS TCP socket buffer tuning in KiB (default 4096 KiB = 4 MB).
-    pub socket_buffer_kb: u32,
-    /// TUI color theme ("Dark", "High Contrast", "Cyberpunk").
-    pub theme: String,
     /// Live UI progress polling interval in milliseconds (default 250ms per TRD §13).
     pub poll_interval_ms: u64,
 }
@@ -36,15 +24,9 @@ impl Default for TurboSettings {
         };
 
         Self {
-            chunk_size_mib: 2,
-            buffer_count: 8,
-            scheduling: "Adaptive".to_string(),
             transport_pref: "Automatic".to_string(),
             download_dir,
             p2p_band: "5 GHz (Primary)".to_string(),
-            in_flight_per_transport: 4,
-            socket_buffer_kb: 4096,
-            theme: "Dark".to_string(),
             poll_interval_ms: 250,
         }
     }
@@ -95,16 +77,14 @@ mod tests {
         let path = temp_dir.path().join("settings.json");
 
         let mut settings = TurboSettings::default();
-        settings.chunk_size_mib = 128;
-        settings.buffer_count = 16;
         settings.transport_pref = "Combined".to_string();
+        settings.p2p_band = "2.4 GHz (Fallback)".to_string();
 
         settings.save_to_path(&path).unwrap();
         let loaded = TurboSettings::load_from_path(&path).unwrap();
 
         assert_eq!(settings, loaded);
-        assert_eq!(loaded.chunk_size_mib, 128);
-        assert_eq!(loaded.buffer_count, 16);
         assert_eq!(loaded.transport_pref, "Combined");
+        assert_eq!(loaded.p2p_band, "2.4 GHz (Fallback)");
     }
 }

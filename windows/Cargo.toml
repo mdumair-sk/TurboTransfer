@@ -1,7 +1,0 @@
-[package]
-name = "turbotransfer-windows"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-turbotransfer-core = { path = "../core" }

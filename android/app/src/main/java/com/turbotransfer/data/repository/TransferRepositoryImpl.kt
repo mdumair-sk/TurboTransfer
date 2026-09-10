@@ -10,7 +10,6 @@ import com.turbotransfer.data.source.rust.RustCoreDataSource
 import com.turbotransfer.domain.model.TransferProgressInfo
 import com.turbotransfer.domain.model.TransferSession
 import com.turbotransfer.domain.model.TransferStatus
-import com.turbotransfer.domain.repository.TransferRepository
 import com.turbotransfer.service.TransferService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.delay
@@ -28,49 +27,63 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class TransferRepositoryImpl @Inject constructor(
-    @ApplicationContext private val context: Context,
-    private val rustCoreDataSource: RustCoreDataSource,
-    private val settingsLocalDataSource: SettingsLocalDataSource,
-    private val transferLockManager: TransferLockManager,
-    private val dispatcherProvider: DispatcherProvider
-) : TransferRepository {
+open class TransferRepositoryImpl(
+    private val context: Context?,
+    private val rustCoreDataSource: RustCoreDataSource?,
+    private val settingsLocalDataSource: SettingsLocalDataSource?,
+    private val transferLockManager: TransferLockManager?,
+    private val dispatcherProvider: DispatcherProvider?,
+    @Suppress("UNUSED_PARAMETER") dummy: Unit?
+) {
+    @Inject
+    constructor(
+        @ApplicationContext context: Context,
+        rustCoreDataSource: RustCoreDataSource,
+        settingsLocalDataSource: SettingsLocalDataSource,
+        transferLockManager: TransferLockManager,
+        dispatcherProvider: DispatcherProvider
+    ) : this(context, rustCoreDataSource, settingsLocalDataSource, transferLockManager, dispatcherProvider, null)
+
+    constructor() : this(null, null, null, null, null, null)
 
     private val _activeSessionFlow = MutableStateFlow<TransferSession?>(null)
-    override val activeSessionFlow: StateFlow<TransferSession?> = _activeSessionFlow.asStateFlow()
+    open val activeSessionFlow: StateFlow<TransferSession?> = _activeSessionFlow.asStateFlow()
 
     private val _isListeningFlow = MutableStateFlow(false)
-    override val isListeningFlow: StateFlow<Boolean> = _isListeningFlow.asStateFlow()
+    open val isListeningFlow: StateFlow<Boolean> = _isListeningFlow.asStateFlow()
 
     private val _receiveStatusFlow = MutableStateFlow("Idle")
-    override val receiveStatusFlow: StateFlow<String> = _receiveStatusFlow.asStateFlow()
+    open val receiveStatusFlow: StateFlow<String> = _receiveStatusFlow.asStateFlow()
 
-    private val _receiveDestDirFlow = MutableStateFlow(settingsLocalDataSource.getReceiveDestDir())
-    override val receiveDestDirFlow: StateFlow<String> = _receiveDestDirFlow.asStateFlow()
+    private val _receiveDestDirFlow by lazy { MutableStateFlow(settingsLocalDataSource?.getReceiveDestDir() ?: "/sdcard/Download") }
+    open val receiveDestDirFlow: StateFlow<String> get() = _receiveDestDirFlow.asStateFlow()
 
-    override fun setReceiveDestDir(path: String) {
-        settingsLocalDataSource.setReceiveDestDir(path)
+    open fun setReceiveDestDir(path: String) {
+        settingsLocalDataSource?.setReceiveDestDir(path)
         _receiveDestDirFlow.value = path
     }
 
-    override fun setActiveSession(session: TransferSession?) {
+    open fun setActiveSession(session: TransferSession?) {
         _activeSessionFlow.value = session
-        if (session != null) {
+        if (session != null && context != null) {
             TransferService.start(context, session.transferId)
         }
     }
 
-    override fun clearActiveSession() {
+    open fun clearActiveSession() {
         _activeSessionFlow.value = null
-        TransferService.stop(context)
+        if (context != null) {
+            TransferService.stop(context)
+        }
     }
 
-    override suspend fun startTransfer(filePath: String, address: String?, fileName: String?): Resource<String> {
+    open suspend fun startTransfer(filePath: String, address: String?, fileName: String?): Resource<String> {
         // Ensure local receiver is stopped so port 9876 is released for outgoing USB/ADB tunnel
-        rustCoreDataSource.stopReceiveMode()
+        rustCoreDataSource?.stopReceiveMode()
         _isListeningFlow.value = false
 
-        val result = rustCoreDataSource.startTransfer(
+        val ds = rustCoreDataSource ?: return Resource.Error("RustCoreDataSource unavailable")
+        val result = ds.startTransfer(
             filePath = filePath,
             fileName = fileName,
             deviceId = null,
@@ -90,7 +103,7 @@ class TransferRepositoryImpl @Inject constructor(
                     isOutgoing = true
                 )
                 _activeSessionFlow.value = session
-                TransferService.start(context, transferId)
+                if (context != null) { TransferService.start(context, transferId) }
                 Resource.Success(transferId)
             },
             onFailure = { error ->
@@ -99,11 +112,11 @@ class TransferRepositoryImpl @Inject constructor(
         )
     }
 
-    override fun observeTransferProgress(transferId: String): Flow<TransferProgressInfo?> = flow {
-        transferLockManager.acquireLocks()
+    open fun observeTransferProgress(transferId: String): Flow<TransferProgressInfo?> = flow {
+        transferLockManager?.acquireLocks()
         try {
             while (true) {
-                val progress = rustCoreDataSource.getProgress(transferId)
+                val progress = rustCoreDataSource?.getProgress(transferId)
                 emit(progress)
 
                 if (progress == null ||
@@ -116,13 +129,14 @@ class TransferRepositoryImpl @Inject constructor(
                 delay(250)
             }
         } finally {
-            transferLockManager.releaseLocks()
+            transferLockManager?.releaseLocks()
         }
-    }.flowOn(dispatcherProvider.io)
+    }.flowOn(dispatcherProvider?.io ?: kotlinx.coroutines.Dispatchers.IO)
 
-    override suspend fun enterReceiveMode(destDir: String, address: String?): Resource<String> {
-        transferLockManager.acquireLocks()
-        val result = rustCoreDataSource.enterReceiveMode(address, destDir)
+    open suspend fun enterReceiveMode(destDir: String, address: String?): Resource<String> {
+        transferLockManager?.acquireLocks()
+        val ds = rustCoreDataSource ?: return Resource.Error("RustCoreDataSource unavailable")
+        val result = ds.enterReceiveMode(address, destDir)
         return result.fold(
             onSuccess = { statusMsg ->
                 _isListeningFlow.value = true
@@ -130,38 +144,41 @@ class TransferRepositoryImpl @Inject constructor(
                 Resource.Success(statusMsg)
             },
             onFailure = { error ->
-                transferLockManager.releaseLocks()
+                transferLockManager?.releaseLocks()
                 Resource.Error(error.message ?: "Failed to enter receive mode", error)
             }
         )
     }
 
-    override suspend fun stopReceiveMode(): Boolean {
-        val stopped = rustCoreDataSource.stopReceiveMode()
-        transferLockManager.releaseLocks()
+    open suspend fun stopReceiveMode(): Boolean {
+        val stopped = rustCoreDataSource?.stopReceiveMode() ?: false
+        transferLockManager?.releaseLocks()
         _isListeningFlow.value = false
         _receiveStatusFlow.value = "Receive listener stopped"
         return stopped
     }
 
-    override suspend fun pauseTransfer(transferId: String): Resource<Unit> {
-        val result = rustCoreDataSource.pauseTransfer(transferId)
+    open suspend fun pauseTransfer(transferId: String): Resource<Unit> {
+        val ds = rustCoreDataSource ?: return Resource.Error("RustCoreDataSource unavailable")
+        val result = ds.pauseTransfer(transferId)
         return result.fold(
             onSuccess = { Resource.Success(Unit) },
             onFailure = { Resource.Error(it.message ?: "Failed to pause transfer", it) }
         )
     }
 
-    override suspend fun resumeTransfer(transferId: String): Resource<String> {
-        val result = rustCoreDataSource.resumeTransfer(transferId, FfiTransportPreference.AUTOMATIC)
+    open suspend fun resumeTransfer(transferId: String): Resource<String> {
+        val ds = rustCoreDataSource ?: return Resource.Error("RustCoreDataSource unavailable")
+        val result = ds.resumeTransfer(transferId, FfiTransportPreference.AUTOMATIC)
         return result.fold(
             onSuccess = { Resource.Success(it) },
             onFailure = { Resource.Error(it.message ?: "Failed to resume transfer", it) }
         )
     }
 
-    override suspend fun cancelTransfer(transferId: String): Resource<Unit> {
-        val result = rustCoreDataSource.cancelTransfer(transferId)
+    open suspend fun cancelTransfer(transferId: String): Resource<Unit> {
+        val ds = rustCoreDataSource ?: return Resource.Error("RustCoreDataSource unavailable")
+        val result = ds.cancelTransfer(transferId)
         _activeSessionFlow.value = null
         return result.fold(
             onSuccess = { Resource.Success(Unit) },
@@ -169,8 +186,9 @@ class TransferRepositoryImpl @Inject constructor(
         )
     }
 
-    override suspend fun pollPendingIncomingTransfer(saveDir: String): TransferSession? {
-        val transfers = rustCoreDataSource.getTransfers()
+    open suspend fun pollPendingIncomingTransfer(saveDir: String): TransferSession? {
+        val ds = rustCoreDataSource ?: return null
+        val transfers = ds.getTransfers()
         val activeTransfer = transfers.firstOrNull {
             it.status == FfiTransferStatus.IN_PROGRESS && it.role == FfiTransferRole.RECEIVER
         } ?: transfers.firstOrNull {
@@ -192,7 +210,7 @@ class TransferRepositoryImpl @Inject constructor(
                     startTimeMs = System.currentTimeMillis()
                 )
                 _activeSessionFlow.value = session
-                TransferService.start(context, activeTransfer.transferId)
+                if (context != null) { TransferService.start(context, activeTransfer.transferId) }
                 session
             } else {
                 current

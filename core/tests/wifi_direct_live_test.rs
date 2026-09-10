@@ -1,5 +1,5 @@
 use std::time::Duration;
-use turbotransfer_core::protocol::{HeartbeatData, Message};
+use turbotransfer_core::protocol::{HelloData, Message};
 use turbotransfer_core::transport::wifi_direct::{WifiDirectConfig, WifiDirectTransport};
 use turbotransfer_core::transport::{Transport, TransportStatus};
 
@@ -29,11 +29,15 @@ async fn test_live_wifi_direct_transport_end_to_end() {
     assert!(transport.is_connected());
     println!("[1/5] SUCCESS: Transport connected! Status: {}", transport.status());
 
-    println!("[2/5] Sending 5 Heartbeat messages over 5GHz Wi-Fi...");
+    println!("[2/5] Sending 5 Hello messages over 5GHz Wi-Fi...");
     for i in 1..=5 {
-        let msg = Message::Heartbeat(HeartbeatData { sequence: i });
-        transport.send_frame(&msg).await.expect("Failed to send heartbeat frame");
-        println!("  -> Sent Heartbeat frame #{}, Total bytes sent: {}", i, transport.bytes_sent());
+        let msg = Message::Hello(HelloData {
+            device_id: uuid::Uuid::nil(),
+            device_name: "LiveWifiTest".to_string(),
+            protocol_version: i,
+        });
+        transport.send_frame(&msg).await.expect("Failed to send frame");
+        println!("  -> Sent Hello frame #{}, Total bytes sent: {}", i, transport.bytes_sent());
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     assert!(transport.bytes_sent() > 0);

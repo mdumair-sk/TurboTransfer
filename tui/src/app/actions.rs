@@ -410,53 +410,6 @@ impl AppState {
                 }
                 _ => {}
             },
-            SettingsTab::Transfer => match self.settings_item {
-                0 => {
-                    self.settings.chunk_size_mib = match self.settings.chunk_size_mib {
-                        2 => 4,
-                        4 => 8,
-                        8 => 16,
-                        16 => 32,
-                        32 => 64,
-                        _ => 2,
-                    };
-                }
-                1 => {
-                    self.settings.scheduling = match self.settings.scheduling.as_str() {
-                        "Adaptive" => "Balanced".to_string(),
-                        _ => "Adaptive".to_string(),
-                    };
-                }
-                _ => {}
-            },
-            SettingsTab::Performance => match self.settings_item {
-                0 => {
-                    self.settings.in_flight_per_transport = match self.settings.in_flight_per_transport {
-                        2 => 4,
-                        4 => 8,
-                        8 => 16,
-                        _ => 2,
-                    };
-                }
-                1 => {
-                    self.settings.buffer_count = match self.settings.buffer_count {
-                        4 => 8,
-                        8 => 16,
-                        _ => 4,
-                    };
-                }
-                _ => {}
-            },
-            SettingsTab::Interface => match self.settings_item {
-                0 => {
-                    self.settings.theme = match self.settings.theme.as_str() {
-                        "Dark" => "Cyberpunk".to_string(),
-                        "Cyberpunk" => "High Contrast".to_string(),
-                        _ => "Dark".to_string(),
-                    };
-                }
-                _ => {}
-            },
             _ => {}
         }
 

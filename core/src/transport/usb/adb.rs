@@ -267,45 +267,30 @@ pub fn cleanup_all_default_adb_tunnels(serial: Option<&str>) {
     }
 }
 
+fn trigger_android_action(serial: &str, action: &str) -> Result<(), TransportError> {
+    let _ = run_adb_cmd(&[
+        "-s", serial, "shell", "am", "start",
+        "-n", "com.turbotransfer/.MainActivity",
+        "-a", action,
+    ]);
+    let _ = run_adb_cmd(&[
+        "-s", serial, "shell", "am", "broadcast",
+        "-a", action, "-p", "com.turbotransfer",
+        "--receiver-include-background",
+    ]);
+    debug!("Triggered {} on device {}", action, serial);
+    Ok(())
+}
+
 /// Triggers the Android app to spin up its 5 GHz Local-Only Hotspot via ADB broadcast.
 pub fn trigger_android_hotspot(serial: &str) -> Result<(), TransportError> {
-    let _ = run_adb_cmd(&[
-        "-s",
-        serial,
-        "shell",
-        "am",
-        "broadcast",
-        "-a",
-        "com.turbotransfer.START_HOTSPOT",
-    ]);
-    debug!("Triggered START_HOTSPOT broadcast on device {}", serial);
-    Ok(())
+    trigger_android_action(serial, "com.turbotransfer.START_HOTSPOT")
 }
 
 /// Triggers the Android app to enter Receive mode via ADB broadcast and foreground launch.
 pub fn trigger_android_receive(serial: &str) -> Result<(), TransportError> {
-    let _ = run_adb_cmd(&[
-        "-s",
-        serial,
-        "shell",
-        "am",
-        "start",
-        "-n",
-        "com.turbotransfer/.MainActivity",
-    ]);
-    let _ = run_adb_cmd(&[
-        "-s",
-        serial,
-        "shell",
-        "am",
-        "broadcast",
-        "-a",
-        "com.turbotransfer.ENTER_RECEIVE",
-    ]);
-    debug!("Triggered ENTER_RECEIVE broadcast on device {}", serial);
-    Ok(())
+    trigger_android_action(serial, "com.turbotransfer.ENTER_RECEIVE")
 }
-
 /// Triggers the Android app to stop Receive mode via ADB broadcast so port 9876 is released.
 pub fn trigger_android_stop_receive(serial: &str) -> Result<(), TransportError> {
     let _ = run_adb_cmd(&[

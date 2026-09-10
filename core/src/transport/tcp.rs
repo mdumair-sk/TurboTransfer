@@ -1,22 +1,17 @@
 use async_trait::async_trait;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use tokio::io::{AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 
+use super::stream::StreamTransport;
+pub use super::stream::{StreamReadHalf as TcpReadHalf, StreamWriteHalf as TcpWriteHalf};
 use super::{Transport, TransportError, TransportKind, TransportReadHalf, TransportStatus, TransportWriteHalf};
-use crate::protocol::{encode_frame_parts, FrameReader, Message};
+use crate::protocol::Message;
 
 /// Concrete TCP implementation of the `Transport` trait using OS sockets (§8, §9).
 pub struct TcpTransport {
-    reader: FrameReader<ReadHalf<TcpStream>>,
-    writer: WriteHalf<TcpStream>,
+    inner: StreamTransport<TcpStream>,
     local_addr: Option<SocketAddr>,
     peer_addr: Option<SocketAddr>,
-    status: TransportStatus,
-    bytes_sent: Arc<AtomicU64>,
-    bytes_received: Arc<AtomicU64>,
 }
 
 /// Configures high-performance TCP socket parameters (TCP_NODELAY + high BDP buffer sizing)
@@ -65,16 +60,11 @@ impl TcpTransport {
         configure_tcp_stream(&stream);
         let local_addr = stream.local_addr().ok();
         let peer_addr = stream.peer_addr().ok();
-        let (read_half, write_half) = tokio::io::split(stream);
-
+        let inner = StreamTransport::new(stream, TransportKind::Tcp);
         Self {
-            reader: FrameReader::new(read_half),
-            writer: write_half,
+            inner,
             local_addr,
             peer_addr,
-            status: TransportStatus::Connected,
-            bytes_sent: Arc::new(AtomicU64::new(0)),
-            bytes_received: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -96,195 +86,33 @@ impl Transport for TcpTransport {
     }
 
     fn status(&self) -> TransportStatus {
-        self.status
+        self.inner.status()
     }
 
     fn bytes_sent(&self) -> u64 {
-        self.bytes_sent.load(Ordering::Relaxed)
+        self.inner.bytes_sent()
     }
 
     fn bytes_received(&self) -> u64 {
-        self.bytes_received.load(Ordering::Relaxed)
+        self.inner.bytes_received()
     }
 
     async fn send_frame(&mut self, msg: &Message) -> Result<(), TransportError> {
-        if self.status != TransportStatus::Connected {
-            return Err(TransportError::Disconnected(
-                "Cannot send frame on disconnected TCP transport".into(),
-            ));
-        }
-
-        let (header, maybe_payload) = encode_frame_parts(msg)?;
-        let payload = maybe_payload.unwrap_or(&[]);
-        let frame_len = (header.len() + payload.len()) as u64;
-
-        if let Err(e) = super::vectored::write_all_vectored(&mut self.writer, &header, payload).await {
-            self.status = TransportStatus::Disconnected;
-            return Err(TransportError::Disconnected(format!(
-                "Socket write error: {}",
-                e
-            )));
-        }
-
-        // Flush handshake and session termination control messages immediately,
-        // but stream continuous ChunkData, ChunkAck, and BatchChunkAck without synchronous flush
-        // since TCP_NODELAY already transmits frames immediately at the OS level.
-        if !matches!(
-            msg,
-            Message::ChunkData(_) | Message::ChunkAck(_) | Message::BatchChunkAck(_)
-        ) {
-            if let Err(e) = self.writer.flush().await {
-                self.status = TransportStatus::Disconnected;
-                return Err(TransportError::Disconnected(format!(
-                    "Socket flush error: {}",
-                    e
-                )));
-            }
-        }
-
-        self.bytes_sent.fetch_add(frame_len, Ordering::Relaxed);
-        Ok(())
+        self.inner.send_frame(msg).await
     }
 
     async fn receive_frame(&mut self) -> Result<Option<Message>, TransportError> {
-        if self.status != TransportStatus::Connected {
-            return Err(TransportError::Disconnected(
-                "Cannot receive frame on disconnected TCP transport".into(),
-            ));
-        }
-
-        match self.reader.read_frame_with_length().await {
-            Ok(Some((msg, frame_len))) => {
-                self.bytes_received.fetch_add(frame_len as u64, Ordering::Relaxed);
-                Ok(Some(msg))
-            }
-            Ok(None) => {
-                self.status = TransportStatus::Disconnected;
-                Ok(None)
-            }
-            Err(e) => {
-                self.status = TransportStatus::Disconnected;
-                Err(TransportError::from(e))
-            }
-        }
+        self.inner.receive_frame().await
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {
-        self.status = TransportStatus::Disconnected;
-        let _ = self.writer.shutdown().await;
-        Ok(())
+        self.inner.close().await
     }
 
     fn split_boxed(
         self: Box<Self>,
     ) -> Result<(Box<dyn TransportWriteHalf>, Box<dyn TransportReadHalf>), TransportError> {
-        let is_connected = Arc::new(std::sync::atomic::AtomicBool::new(
-            self.status == TransportStatus::Connected,
-        ));
-        let write_half = TcpWriteHalf {
-            writer: self.writer,
-            bytes_sent: self.bytes_sent,
-            is_connected: is_connected.clone(),
-        };
-        let read_half = TcpReadHalf {
-            reader: self.reader,
-            bytes_received: self.bytes_received,
-            is_connected,
-        };
-        Ok((Box::new(write_half), Box::new(read_half)))
-    }
-}
-
-/// Write half of a decoupled TCP transport (§8, §9, §10).
-pub struct TcpWriteHalf {
-    writer: WriteHalf<TcpStream>,
-    bytes_sent: Arc<AtomicU64>,
-    is_connected: Arc<std::sync::atomic::AtomicBool>,
-}
-
-#[async_trait]
-impl TransportWriteHalf for TcpWriteHalf {
-    async fn send_frame(&mut self, msg: &Message) -> Result<(), TransportError> {
-        if !self.is_connected.load(Ordering::Relaxed) {
-            return Err(TransportError::Disconnected(
-                "Cannot send frame on disconnected TCP write half".into(),
-            ));
-        }
-
-        let (header, maybe_payload) = encode_frame_parts(msg)?;
-        let payload = maybe_payload.unwrap_or(&[]);
-        let frame_len = (header.len() + payload.len()) as u64;
-
-        if let Err(e) = super::vectored::write_all_vectored(&mut self.writer, &header, payload).await {
-            self.is_connected.store(false, Ordering::Relaxed);
-            return Err(TransportError::Disconnected(format!(
-                "Socket write error: {}",
-                e
-            )));
-        }
-
-        if !matches!(
-            msg,
-            Message::ChunkData(_) | Message::ChunkAck(_) | Message::BatchChunkAck(_)
-        ) {
-            if let Err(e) = self.writer.flush().await {
-                self.is_connected.store(false, Ordering::Relaxed);
-                return Err(TransportError::Disconnected(format!(
-                    "Socket flush error: {}",
-                    e
-                )));
-            }
-        }
-
-        self.bytes_sent.fetch_add(frame_len, Ordering::Relaxed);
-        Ok(())
-    }
-
-    async fn close(&mut self) -> Result<(), TransportError> {
-        self.is_connected.store(false, Ordering::Relaxed);
-        let _ = self.writer.shutdown().await;
-        Ok(())
-    }
-
-    fn bytes_sent(&self) -> u64 {
-        self.bytes_sent.load(Ordering::Relaxed)
-    }
-}
-
-/// Read half of a decoupled TCP transport (§8, §9, §10).
-pub struct TcpReadHalf {
-    reader: FrameReader<ReadHalf<TcpStream>>,
-    bytes_received: Arc<AtomicU64>,
-    is_connected: Arc<std::sync::atomic::AtomicBool>,
-}
-
-#[async_trait]
-impl TransportReadHalf for TcpReadHalf {
-    async fn receive_frame(&mut self) -> Result<Option<Message>, TransportError> {
-        if !self.is_connected.load(Ordering::Relaxed) {
-            return Err(TransportError::Disconnected(
-                "Cannot receive frame on disconnected TCP read half".into(),
-            ));
-        }
-
-        match self.reader.read_frame_with_length().await {
-            Ok(Some((msg, frame_len))) => {
-                self.bytes_received.fetch_add(frame_len as u64, Ordering::Relaxed);
-                Ok(Some(msg))
-            }
-            Ok(None) => {
-                self.is_connected.store(false, Ordering::Relaxed);
-                Ok(None)
-            }
-            Err(e) => {
-                self.is_connected.store(false, Ordering::Relaxed);
-                Err(TransportError::from(e))
-            }
-        }
-    }
-
-    fn bytes_received(&self) -> u64 {
-        self.bytes_received.load(Ordering::Relaxed)
+        Box::new(self.inner).split_boxed()
     }
 }
 

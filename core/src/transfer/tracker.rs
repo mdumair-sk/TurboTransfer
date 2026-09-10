@@ -1,29 +1,7 @@
 use std::collections::HashSet;
 use uuid::Uuid;
 
-/// Trait defining the contract for tracking chunk completion and idempotent writes (§5.1 & §5.3).
-pub trait ChunkTracker: Send + Sync {
-    /// Checks if a chunk matching `(transfer_id, file_id, chunk_id, checksum)` has already been completed.
-    fn is_chunk_completed(
-        &self,
-        transfer_id: Uuid,
-        file_id: Uuid,
-        chunk_id: u32,
-        checksum: u64,
-    ) -> bool;
-
-    /// Marks a chunk as completed.
-    fn mark_chunk_completed(
-        &mut self,
-        transfer_id: Uuid,
-        file_id: Uuid,
-        chunk_id: u32,
-        checksum: u64,
-    );
-
-    /// Returns the coalesced list of completed chunk ID ranges `[start, end]` (inclusive).
-    fn get_completed_ranges(&self) -> Option<Vec<(u32, u32)>>;
-}
+pub type ChunkTracker = InMemoryChunkTracker;
 
 /// A simple isolated in-memory implementation of `ChunkTracker` for milestone 3.
 #[derive(Debug, Default, Clone)]
@@ -61,10 +39,8 @@ impl InMemoryChunkTracker {
         }
         missing
     }
-}
 
-impl ChunkTracker for InMemoryChunkTracker {
-    fn is_chunk_completed(
+    pub fn is_chunk_completed(
         &self,
         transfer_id: Uuid,
         file_id: Uuid,
@@ -78,7 +54,7 @@ impl ChunkTracker for InMemoryChunkTracker {
                 .contains(&(transfer_id, file_id, chunk_id, 0))
     }
 
-    fn mark_chunk_completed(
+    pub fn mark_chunk_completed(
         &mut self,
         transfer_id: Uuid,
         file_id: Uuid,
@@ -89,7 +65,7 @@ impl ChunkTracker for InMemoryChunkTracker {
             .insert((transfer_id, file_id, chunk_id, checksum));
     }
 
-    fn get_completed_ranges(&self) -> Option<Vec<(u32, u32)>> {
+    pub fn get_completed_ranges(&self) -> Option<Vec<(u32, u32)>> {
         if self.completed.is_empty() {
             return None;
         }

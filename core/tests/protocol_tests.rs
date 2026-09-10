@@ -57,7 +57,6 @@ fn sample_messages() -> Vec<Message> {
             transfer_id: t_id,
             file_checksum: 0x87654321,
         }),
-        Message::Heartbeat(HeartbeatData { sequence: 42 }),
         Message::BatchChunkAck(BatchChunkAckData {
             transfer_id: t_id,
             chunk_ids: vec![1, 2, 3],
@@ -69,7 +68,7 @@ fn sample_messages() -> Vec<Message> {
 #[test]
 fn test_roundtrip_all_message_types() {
     let messages = sample_messages();
-    assert_eq!(messages.len(), 13);
+    assert_eq!(messages.len(), 12);
 
     for original in &messages {
         let encoded = encode_frame(original).expect("Encode should succeed");
@@ -161,7 +160,7 @@ fn test_malformed_and_truncated_frames() {
 
     // 3. Payload length mismatch (header claims 10 bytes, but slice ends)
     let mut header = (10u32).to_le_bytes().to_vec();
-    header.push(MSG_TYPE_HEARTBEAT); // type byte
+    header.push(MSG_TYPE_HELLO); // type byte
     header.extend_from_slice(&[1, 2, 3]); // only 3 bytes payload instead of 9
     assert!(matches!(
         decode_frame(&header),
@@ -170,8 +169,8 @@ fn test_malformed_and_truncated_frames() {
 
     // 4. Invalid bincode payload for variant
     let mut bad_payload = (5u32).to_le_bytes().to_vec();
-    bad_payload.push(MSG_TYPE_HEARTBEAT);
-    bad_payload.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]); // invalid bincode for u64
+    bad_payload.push(MSG_TYPE_HELLO);
+    bad_payload.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]); // invalid bincode for HelloData
     assert!(matches!(
         decode_frame(&bad_payload),
         Err(ProtocolError::DeserializationError(_))
@@ -184,8 +183,7 @@ async fn test_frame_reader_exceeds_max_size() {
 
     // Frame claiming 1000 bytes payload length
     let mut header = (1000u32).to_le_bytes().to_vec();
-    header.push(MSG_TYPE_HEARTBEAT);
-
+    header.push(MSG_TYPE_HELLO);
     tokio::spawn(async move {
         client.write_all(&header).await.unwrap();
     });

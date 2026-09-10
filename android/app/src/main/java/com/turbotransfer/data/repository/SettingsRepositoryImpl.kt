@@ -1,36 +1,42 @@
 package com.turbotransfer.data.repository
 
 import com.turbotransfer.data.source.local.SettingsLocalDataSource
-import com.turbotransfer.domain.repository.SettingsRepository
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class SettingsRepositoryImpl @Inject constructor(
-    private val localDataSource: SettingsLocalDataSource
-) : SettingsRepository {
+open class SettingsRepositoryImpl(
+    private val localDataSource: SettingsLocalDataSource?,
+    @Suppress("UNUSED_PARAMETER") dummy: Unit?
+) {
+    @Inject
+    constructor(
+        localDataSource: SettingsLocalDataSource
+    ) : this(localDataSource, null)
 
-    override fun getDeviceName(): String = localDataSource.getDeviceName()
+    constructor() : this(null, null)
 
-    override fun setDeviceName(name: String) {
-        localDataSource.setDeviceName(name)
+    open fun getDeviceName(): String = localDataSource?.getDeviceName() ?: "Android Device"
+
+    open fun setDeviceName(name: String) {
+        localDataSource?.setDeviceName(name)
     }
 
-    override fun is5GhzPreferred(): Boolean = localDataSource.is5GhzPreferred()
+    open fun is5GhzPreferred(): Boolean = localDataSource?.is5GhzPreferred() ?: true
 
-    override fun set5GhzPreferred(enabled: Boolean) {
-        localDataSource.set5GhzPreferred(enabled)
+    open fun set5GhzPreferred(enabled: Boolean) {
+        localDataSource?.set5GhzPreferred(enabled)
     }
 
-    override fun isAutoWakeLockEnabled(): Boolean = localDataSource.isAutoWakeLockEnabled()
+    open fun isAutoWakeLockEnabled(): Boolean = localDataSource?.isAutoWakeLockEnabled() ?: true
 
-    override fun setAutoWakeLockEnabled(enabled: Boolean) {
-        localDataSource.setAutoWakeLockEnabled(enabled)
+    open fun setAutoWakeLockEnabled(enabled: Boolean) {
+        localDataSource?.setAutoWakeLockEnabled(enabled)
     }
 
-    override fun getReceiveDestDir(): String = localDataSource.getReceiveDestDir()
+    open fun getReceiveDestDir(): String = localDataSource?.getReceiveDestDir() ?: "/sdcard/Download"
 
-    override fun setReceiveDestDir(dir: String) {
-        localDataSource.setReceiveDestDir(dir)
+    open fun setReceiveDestDir(dir: String) {
+        localDataSource?.setReceiveDestDir(dir)
     }
 }

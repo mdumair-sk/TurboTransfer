@@ -254,50 +254,56 @@ impl WifiDirectTransport {
         )))
     }
 
+    /// Probes the local ADB-forwarded control channel on port 9875 for active hotspot credentials.
+    #[cfg(target_os = "windows")]
+    pub async fn probe_hotspot_control_channel(timeout: Duration) -> Option<WifiDirectConfig> {
+        use tokio::io::AsyncBufReadExt;
+        let stream = tokio::time::timeout(timeout, TcpStream::connect("127.0.0.1:9875")).await.ok()?.ok()?;
+        let mut reader = tokio::io::BufReader::new(stream);
+        let mut line = String::new();
+        let n = tokio::time::timeout(Duration::from_millis(1000), reader.read_line(&mut line)).await.ok()?.ok()?;
+        if n == 0 { return None; }
+        let val: serde_json::Value = serde_json::from_str(&line).ok()?;
+        let ssid = val.get("ssid")?.as_str()?;
+        let passphrase = val.get("passphrase")?.as_str()?;
+        if ssid.is_empty() { return None; }
+        let ip = val.get("ip").and_then(|s| s.as_str()).unwrap_or("").to_string();
+        let port = val.get("port").and_then(|p| p.as_u64()).unwrap_or(9876) as u16;
+        Some(WifiDirectConfig::new(ssid, passphrase, ip, port))
+    }
+
     /// Discovers active Android 5 GHz Hotspot credentials via the USB control channel (port 9875).
     /// If Android has not started the hotspot yet, it triggers it via ADB and retries polling.
     pub async fn discover_android_hotspot(#[allow(unused_variables)] serial: Option<&str>) -> Option<WifiDirectConfig> {
         #[cfg(target_os = "windows")]
         {
+            if let Some(config) = Self::probe_hotspot_control_channel(Duration::from_millis(150)).await {
+                info!("Instant discovery of active Android Direct Hotspot: SSID='{}'", config.ssid);
+                return Some(config);
+            }
+
             let target_serial = match serial {
                 Some(s) => Some(s.to_string()),
                 None => {
-                    if let Ok(devices) = crate::transport::usb::UsbTransport::list_adb_devices() {
-                        devices.into_iter().find(|d| d.state == "device").map(|d| d.serial)
-                    } else {
-                        None
-                    }
+                    crate::transport::usb::UsbTransport::list_adb_devices()
+                        .ok()?
+                        .into_iter()
+                        .find(|d| d.state == "device")
+                        .map(|d| d.serial)
                 }
             };
 
-            if let Some(ref ser) = target_serial {
+            if let Some(ser) = &target_serial {
                 let _ = crate::transport::usb::UsbTransport::setup_adb_forward(ser, 9875, 9875);
                 let _ = crate::transport::usb::UsbTransport::trigger_android_hotspot(ser);
             }
 
-            // Retry loop (up to 8 attempts across 4 seconds) to allow Android to grant hotspot reservation
-            for attempt in 1..=8 {
-                let stream_res = tokio::time::timeout(Duration::from_millis(500), TcpStream::connect("127.0.0.1:9875")).await;
-                if let Ok(Ok(stream)) = stream_res {
-                    use tokio::io::AsyncBufReadExt;
-                    let mut reader = tokio::io::BufReader::new(stream);
-                    let mut line = String::new();
-                    if let Ok(Ok(_)) = tokio::time::timeout(Duration::from_millis(600), reader.read_line(&mut line)).await {
-                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
-                            if let (Some(ssid), Some(passphrase)) = (val.get("ssid").and_then(|s| s.as_str()), val.get("passphrase").and_then(|s| s.as_str())) {
-                                if !ssid.is_empty() {
-                                    let ip = val.get("ip").and_then(|s| s.as_str()).unwrap_or("").to_string();
-                                    let port = val.get("port").and_then(|p| p.as_u64()).unwrap_or(9876) as u16;
-                                    let config = WifiDirectConfig::new(ssid, passphrase, ip, port);
-                                    info!("Discovered Android Direct Hotspot: SSID='{}', IP='{}:{}'", config.ssid, config.target_ip, config.port);
-                                    return Some(config);
-                                }
-                            }
-                        }
-                    }
+            for attempt in 1..=20 {
+                if let Some(config) = Self::probe_hotspot_control_channel(Duration::from_millis(500)).await {
+                    info!("Discovered Android Direct Hotspot: SSID='{}', IP='{}:{}'", config.ssid, config.target_ip, config.port);
+                    return Some(config);
                 }
-
-                if attempt < 8 {
+                if attempt < 20 {
                     tokio::time::sleep(Duration::from_millis(500)).await;
                 }
             }
@@ -368,7 +374,7 @@ impl WifiDirectTransport {
 
     /// Generates the XML profile and triggers Windows WLAN association via `netsh`.
     #[cfg(target_os = "windows")]
-    pub async fn associate_wlan_windows(config: &WifiDirectConfig) -> Result<(), TransportError> {
+    pub fn associate_wlan_windows_sync(config: &WifiDirectConfig) -> Result<(), TransportError> {
         use std::process::Command;
 
         let ssid = &config.ssid;
@@ -382,7 +388,7 @@ impl WifiDirectTransport {
         <SSID>
             <name>{ssid}</name>
         </SSID>
-        <nonBroadcast>true</nonBroadcast>
+        <nonBroadcast>false</nonBroadcast>
     </SSIDConfig>
     <connectionType>ESS</connectionType>
     <connectionMode>manual</connectionMode>
@@ -408,21 +414,67 @@ impl WifiDirectTransport {
         let temp_str = temp_file.to_string_lossy();
 
         // 1. Add profile
-        let _ = Command::new("netsh")
+        let add_out = Command::new("netsh")
             .args(["wlan", "add", "profile", &format!("filename={}", temp_str), "user=current"])
             .output();
 
         let _ = std::fs::remove_file(&temp_file);
 
-        // 2. Connect to direct SSID
-        let _ = Command::new("netsh")
-            .args(["wlan", "connect", &format!("name={}", ssid), &format!("ssid={}", ssid)])
-            .output();
+        if let Ok(out) = add_out {
+            if !out.status.success() {
+                let err = String::from_utf8_lossy(&out.stdout);
+                return Err(TransportError::Other(format!("netsh add profile failed: {}", err.trim())));
+            }
+        }
 
+        // 2. Connect to direct SSID
+        let name_arg = format!("name={}", ssid);
+        let ssid_arg = format!("ssid={}", ssid);
+        let mut connect_args = vec!["wlan", "connect", name_arg.as_str(), ssid_arg.as_str()];
+        let iface_opt = Self::get_windows_wifi_interface_name();
+        let iface_arg = iface_opt.as_ref().map(|i| format!("interface={}", i));
+        if let Some(if_arg) = &iface_arg {
+            connect_args.push(if_arg.as_str());
+        }
+        let conn_out = Command::new("netsh").args(&connect_args).output();
+        if let Ok(out) = conn_out {
+            if !out.status.success() {
+                let err = String::from_utf8_lossy(&out.stdout);
+                return Err(TransportError::Other(format!("netsh connect failed: {}", err.trim())));
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "windows")]
+    pub async fn associate_wlan_windows(config: &WifiDirectConfig) -> Result<(), TransportError> {
+        Self::associate_wlan_windows_sync(config)?;
         // Wait brief grace period for association
         tokio::time::sleep(Duration::from_millis(1500)).await;
-
         Ok(())
+    }
+
+    /// Queries the active Windows Wi-Fi interface name (e.g. "Wi-Fi").
+    #[cfg(target_os = "windows")]
+    pub fn get_windows_wifi_interface_name() -> Option<String> {
+        use std::process::Command;
+        let output = Command::new("netsh")
+            .args(["wlan", "show", "interfaces"])
+            .output()
+            .ok()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("Name") {
+                if let Some(pos) = trimmed.find(':') {
+                    let name = trimmed[pos + 1..].trim().to_string();
+                    if !name.is_empty() {
+                        return Some(name);
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Queries the currently active Windows Wi-Fi SSID (e.g. Home Wi-Fi) to allow restoration on exit.
@@ -727,7 +779,7 @@ impl TransportReadHalf for WifiDirectReadHalf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{HeartbeatData, Message};
+    use crate::protocol::{HelloData, Message};
     use tokio::net::TcpListener;
 
     #[tokio::test]
@@ -746,18 +798,20 @@ mod tests {
         assert_eq!(client_transport.status(), TransportStatus::Connected);
         assert!(client_transport.is_connected());
 
-        // Send Heartbeat frame
-        let hb = Message::Heartbeat(HeartbeatData {
-            sequence: 12345678,
+        // Send Hello frame
+        let hello = Message::Hello(HelloData {
+            device_id: uuid::Uuid::nil(),
+            device_name: "TestDevice".to_string(),
+            protocol_version: 1,
         });
 
-        client_transport.send_frame(&hb).await.unwrap();
+        client_transport.send_frame(&hello).await.unwrap();
         assert!(client_transport.bytes_sent() > 0);
 
         let received = server_transport.receive_frame().await.unwrap().unwrap();
         match received {
-            Message::Heartbeat(msg) => assert_eq!(msg.sequence, 12345678),
-            _ => panic!("Expected Heartbeat message"),
+            Message::Hello(msg) => assert_eq!(msg.protocol_version, 1),
+            _ => panic!("Expected Hello message"),
         }
 
         // Close transport
@@ -766,7 +820,7 @@ mod tests {
         assert!(!client_transport.is_connected());
 
         // Subsequent sends must fail
-        let send_result = client_transport.send_frame(&hb).await;
+        let send_result = client_transport.send_frame(&hello).await;
         assert!(send_result.is_err());
     }
 
@@ -797,10 +851,12 @@ mod tests {
         assert_eq!(transport.status(), TransportStatus::Disconnected);
 
         // Subsequent sends must be rejected
-        let hb = Message::Heartbeat(HeartbeatData {
-            sequence: 9999,
+        let hello = Message::Hello(HelloData {
+            device_id: uuid::Uuid::nil(),
+            device_name: "TestDevice".to_string(),
+            protocol_version: 1,
         });
-        let res = transport.send_frame(&hb).await;
+        let res = transport.send_frame(&hello).await;
         assert!(res.is_err());
     }
 

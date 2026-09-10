@@ -3,23 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
-use uuid::Uuid;
 
-use crate::checksum::compute_xxhash64;
-
-/// Represents a single stateless data-plane chunk (§5.1).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Chunk {
-    pub transfer_id: Uuid,
-    pub file_id: Uuid,
-    /// Sequence index, 0-based
-    pub chunk_id: u32,
-    pub file_offset: u64,
-    pub payload_length: u32,
-    /// xxHash64 of payload
-    pub checksum: u64,
-    pub payload: Bytes,
-}
 
 /// Represents the planned offset and size for a chunk without reading file contents into memory.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,23 +83,3 @@ pub fn read_chunk_into_slice(
     Ok(())
 }
 
-/// Constructs a full `Chunk` struct from a `ChunkPlanEntry` and file on disk.
-pub fn create_chunk<P: AsRef<Path>>(
-    transfer_id: Uuid,
-    file_id: Uuid,
-    entry: &ChunkPlanEntry,
-    file_path: P,
-) -> Result<Chunk, std::io::Error> {
-    let payload = read_chunk_at(file_path, entry.file_offset, entry.payload_length)?;
-    let checksum = compute_xxhash64(&payload);
-
-    Ok(Chunk {
-        transfer_id,
-        file_id,
-        chunk_id: entry.chunk_id,
-        file_offset: entry.file_offset,
-        payload_length: entry.payload_length,
-        checksum,
-        payload,
-    })
-}

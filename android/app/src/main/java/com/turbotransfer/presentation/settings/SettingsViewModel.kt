@@ -2,9 +2,8 @@ package com.turbotransfer.presentation.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.turbotransfer.domain.usecase.discovery.ObserveReceiverDiscoveryUseCase
-import com.turbotransfer.domain.usecase.settings.GetSettingsUseCase
-import com.turbotransfer.domain.usecase.settings.UpdateSettingsUseCase
+import com.turbotransfer.data.repository.DiscoveryRepositoryImpl
+import com.turbotransfer.data.repository.SettingsRepositoryImpl
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
@@ -14,9 +13,8 @@ import uniffi.turbotransfer_core.*
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    private val getSettingsUseCase: GetSettingsUseCase,
-    private val updateSettingsUseCase: UpdateSettingsUseCase,
-    private val observeReceiverDiscoveryUseCase: ObserveReceiverDiscoveryUseCase
+    private val settingsRepository: SettingsRepositoryImpl,
+    private val discoveryRepository: DiscoveryRepositoryImpl
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -25,15 +23,15 @@ class SettingsViewModel @Inject constructor(
     init {
         _uiState.update {
             it.copy(
-                deviceName = getSettingsUseCase.getDeviceName(),
-                prefer5Ghz = getSettingsUseCase.is5GhzPreferred(),
-                autoWakeLock = getSettingsUseCase.isAutoWakeLockEnabled()
+                deviceName = settingsRepository.getDeviceName(),
+                prefer5Ghz = settingsRepository.is5GhzPreferred(),
+                autoWakeLock = settingsRepository.isAutoWakeLockEnabled()
             )
         }
         loadSavedCalibration("")
 
         viewModelScope.launch {
-            observeReceiverDiscoveryUseCase().collect { receiver ->
+            discoveryRepository.observeReceiverDiscovery().collect { receiver ->
                 if (receiver != null) {
                     _uiState.update { current ->
                         if (current.targetAddress.isBlank() || current.targetAddress == "127.0.0.1:9876" || !current.targetAddress.contains(",")) {
@@ -53,17 +51,17 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setDeviceName(name: String) {
-        updateSettingsUseCase.setDeviceName(name)
+        settingsRepository.setDeviceName(name)
         _uiState.update { it.copy(deviceName = name) }
     }
 
     fun setPrefer5Ghz(enabled: Boolean) {
-        updateSettingsUseCase.set5GhzPreferred(enabled)
+        settingsRepository.set5GhzPreferred(enabled)
         _uiState.update { it.copy(prefer5Ghz = enabled) }
     }
 
     fun setAutoWakeLock(enabled: Boolean) {
-        updateSettingsUseCase.setAutoWakeLockEnabled(enabled)
+        settingsRepository.setAutoWakeLockEnabled(enabled)
         _uiState.update { it.copy(autoWakeLock = enabled) }
     }
 

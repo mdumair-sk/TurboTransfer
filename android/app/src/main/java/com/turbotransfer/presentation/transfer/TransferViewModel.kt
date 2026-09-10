@@ -9,13 +9,9 @@ import com.turbotransfer.core.common.Resource
 import com.turbotransfer.domain.model.HistoryItem
 import com.turbotransfer.domain.model.TransferProgressInfo
 import com.turbotransfer.domain.model.TransferStatus
-import com.turbotransfer.domain.usecase.history.AddHistoryRecordUseCase
-import com.turbotransfer.domain.usecase.settings.GetSettingsUseCase
-import com.turbotransfer.domain.usecase.transfer.CancelTransferUseCase
-import com.turbotransfer.domain.usecase.transfer.ObserveActiveTransferUseCase
-import com.turbotransfer.domain.usecase.transfer.ObserveTransferProgressUseCase
-import com.turbotransfer.domain.usecase.transfer.PauseTransferUseCase
-import com.turbotransfer.domain.usecase.transfer.ResumeTransferUseCase
+import com.turbotransfer.data.repository.HistoryRepositoryImpl
+import com.turbotransfer.data.repository.SettingsRepositoryImpl
+import com.turbotransfer.data.repository.TransferRepositoryImpl
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
@@ -26,13 +22,9 @@ import javax.inject.Inject
 @HiltViewModel
 class TransferViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val observeActiveTransferUseCase: ObserveActiveTransferUseCase,
-    private val observeTransferProgressUseCase: ObserveTransferProgressUseCase,
-    private val pauseTransferUseCase: PauseTransferUseCase,
-    private val resumeTransferUseCase: ResumeTransferUseCase,
-    private val cancelTransferUseCase: CancelTransferUseCase,
-    private val addHistoryRecordUseCase: AddHistoryRecordUseCase,
-    private val getSettingsUseCase: GetSettingsUseCase
+    private val transferRepository: TransferRepositoryImpl,
+    private val historyRepository: HistoryRepositoryImpl,
+    private val settingsRepository: SettingsRepositoryImpl
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TransferUiState())
@@ -43,7 +35,7 @@ class TransferViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            observeActiveTransferUseCase().collectLatest { session ->
+            transferRepository.activeSessionFlow.collectLatest { session ->
                 _uiState.update { it.copy(activeSession = session) }
                 if (session != null) {
                     speedSum = 0.0
@@ -56,7 +48,7 @@ class TransferViewModel @Inject constructor(
                         )
                     }
 
-                    observeTransferProgressUseCase(session.transferId).collect { progress ->
+                    transferRepository.observeTransferProgress(session.transferId).collect { progress ->
                         handleProgressUpdate(progress, session)
                     }
                 } else {
@@ -113,7 +105,7 @@ class TransferViewModel @Inject constructor(
                 0.0
             }
 
-            val saveDir = getSettingsUseCase.getReceiveDestDir()
+            val saveDir = settingsRepository.getReceiveDestDir()
             val finalPath = session.filePath.ifBlank { File(saveDir, progress.fileName).absolutePath }
 
             val item = HistoryItem(
@@ -135,7 +127,6 @@ class TransferViewModel @Inject constructor(
                 status = "Completed"
             )
 
-            addHistoryRecordUseCase(item)
             _uiState.update { it.copy(lastCompletedItem = item) }
 
             if (!session.isOutgoing && finalPath.isNotBlank()) {
@@ -145,9 +136,10 @@ class TransferViewModel @Inject constructor(
             }
 
             val verb = if (session.isOutgoing) "Sent" else "Received"
+            historyRepository.addTransferRecord(item)
             _uiState.update { it.copy(userMessage = "$verb ${item.fileName} successfully!") }
         } else if (progress.status == TransferStatus.FAILED || progress.status == TransferStatus.CANCELLED) {
-            val saveDir = getSettingsUseCase.getReceiveDestDir()
+            val saveDir = settingsRepository.getReceiveDestDir()
             val finalPath = session.filePath.ifBlank { File(saveDir, progress.fileName).absolutePath }
             val item = HistoryItem(
                 id = session.transferId,
@@ -165,13 +157,13 @@ class TransferViewModel @Inject constructor(
                 wifiSpeedMBps = 0.0,
                 status = if (progress.status == TransferStatus.FAILED) "Failed" else "Cancelled"
             )
-            addHistoryRecordUseCase(item)
+            historyRepository.addTransferRecord(item)
         }
     }
 
     fun pauseTransfer(transferId: String) {
         viewModelScope.launch {
-            val res = pauseTransferUseCase(transferId)
+            val res = transferRepository.pauseTransfer(transferId)
             if (res is Resource.Error) {
                 _uiState.update { it.copy(userMessage = "Error: ${res.message}") }
             }
@@ -180,7 +172,7 @@ class TransferViewModel @Inject constructor(
 
     fun resumeTransfer(transferId: String) {
         viewModelScope.launch {
-            val res = resumeTransferUseCase(transferId)
+            val res = transferRepository.resumeTransfer(transferId)
             if (res is Resource.Error) {
                 _uiState.update { it.copy(userMessage = "Error: ${res.message}") }
             }
@@ -189,7 +181,7 @@ class TransferViewModel @Inject constructor(
 
     fun cancelTransfer(transferId: String) {
         viewModelScope.launch {
-            cancelTransferUseCase(transferId)
+            transferRepository.cancelTransfer(transferId)
             _uiState.update { it.copy(progress = null, activeSession = null) }
         }
     }

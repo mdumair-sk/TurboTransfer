@@ -2,9 +2,7 @@ package com.turbotransfer.presentation.history
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.turbotransfer.domain.usecase.history.ClearHistoryUseCase
-import com.turbotransfer.domain.usecase.history.DeleteHistoryRecordUseCase
-import com.turbotransfer.domain.usecase.history.GetHistoryUseCase
+import com.turbotransfer.data.repository.HistoryRepositoryImpl
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -12,9 +10,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class HistoryViewModel @Inject constructor(
-    private val getHistoryUseCase: GetHistoryUseCase,
-    private val deleteHistoryRecordUseCase: DeleteHistoryRecordUseCase,
-    private val clearHistoryUseCase: ClearHistoryUseCase
+    private val historyRepository: HistoryRepositoryImpl
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HistoryUiState())
@@ -22,7 +18,7 @@ class HistoryViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            getHistoryUseCase().collect { list ->
+            historyRepository.historyFlow.collect { list ->
                 _uiState.update { it.copy(historyList = list) }
             }
         }
@@ -33,11 +29,11 @@ class HistoryViewModel @Inject constructor(
     }
 
     fun deleteRecord(id: String) {
-        deleteHistoryRecordUseCase(id)
+        historyRepository.deleteRecord(id)
     }
 
     fun clearHistory() {
-        clearHistoryUseCase()
+        historyRepository.clearHistory()
         _uiState.update { it.copy(showClearDialog = false) }
     }
 }

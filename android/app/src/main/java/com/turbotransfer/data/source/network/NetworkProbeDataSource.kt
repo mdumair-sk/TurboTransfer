@@ -37,10 +37,7 @@ class NetworkProbeDataSource @Inject constructor(
             "10.18.163.2",
             "192.168.43.1",
             "192.168.43.2",
-            "192.168.137.1",
-            "192.168.1.1",
-            "192.168.0.1",
-            "10.0.2.2"
+            "192.168.137.1"
         )
 
         // 1. Check Wi-Fi DHCP gateway / server
@@ -59,9 +56,9 @@ class NetworkProbeDataSource @Inject constructor(
             }
         } catch (_: Exception) {}
 
-        // 2. Add subnet candidates from local active interfaces
-        val localIps = getLocalIpAddresses()
-        for (localIp in localIps) {
+        // 2. Add subnet candidates ONLY from local active Wi-Fi interfaces (wlan*, p2p*, ap*, softap*)
+        val wifiIps = getLocalWifiIpAddresses()
+        for (localIp in wifiIps) {
             val parts = localIp.split(".")
             if (parts.size == 4) {
                 val prefix = "${parts[0]}.${parts[1]}.${parts[2]}"
@@ -72,7 +69,7 @@ class NetworkProbeDataSource @Inject constructor(
                 candidateIps.add("$prefix.101")
                 candidateIps.add("$prefix.254")
 
-                // Probe nearest 1..35 neighbors in local subnet
+                // Probe nearest 1..35 neighbors in local Wi-Fi subnet
                 for (host in 1..35) {
                     val ip = "$prefix.$host"
                     if (ip != localIp) {
@@ -82,19 +79,65 @@ class NetworkProbeDataSource @Inject constructor(
             }
         }
 
+        // 3. Scan ARP table entries associated with wlan interfaces
         try {
             val arpLines = File("/proc/net/arp").readLines()
             for (line in arpLines.drop(1)) {
                 val tokens = line.trim().split(Regex("\\s+"))
-                if (tokens.isNotEmpty()) {
+                if (tokens.size >= 6) {
                     val ip = tokens[0]
-                    if (ip.matches(Regex("\\d+\\.\\d+\\.\\d+\\.\\d+"))) {
+                    val dev = tokens[5].lowercase()
+                    if (ip.matches(Regex("\\d+\\.\\d+\\.\\d+\\.\\d+")) && (dev.startsWith("wlan") || dev.startsWith("p2p") || dev.startsWith("ap"))) {
                         candidateIps.add(ip)
                     }
                 }
             }
         } catch (_: Exception) {}
 
+        probeIpSet(candidateIps, port)
+    }
+
+    suspend fun probeCandidateUsbTetherReceivers(port: Int = 9876): String? = withContext(dispatcherProvider.io) {
+        val candidateIps = mutableSetOf<String>()
+
+        // 1. Add subnet candidates from USB tether / RNDIS interfaces (rndis*, usb*, ncm*)
+        val tetherIps = getLocalUsbTetherIpAddresses()
+        for (localIp in tetherIps) {
+            val parts = localIp.split(".")
+            if (parts.size == 4) {
+                val prefix = "${parts[0]}.${parts[1]}.${parts[2]}"
+                candidateIps.add("$prefix.1")
+                candidateIps.add("$prefix.2")
+                candidateIps.add("$prefix.30")
+
+                for (host in 1..35) {
+                    val ip = "$prefix.$host"
+                    if (ip != localIp) {
+                        candidateIps.add(ip)
+                    }
+                }
+            }
+        }
+
+        // 2. Scan ARP table entries for resolved neighbors on rndis/usb devices
+        try {
+            val arpLines = File("/proc/net/arp").readLines()
+            for (line in arpLines.drop(1)) {
+                val tokens = line.trim().split(Regex("\\s+"))
+                if (tokens.size >= 6) {
+                    val ip = tokens[0]
+                    val dev = tokens[5].lowercase()
+                    if (ip.matches(Regex("\\d+\\.\\d+\\.\\d+\\.\\d+")) && (dev.startsWith("rndis") || dev.startsWith("usb") || dev.startsWith("ncm"))) {
+                        candidateIps.add(ip)
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        probeIpSet(candidateIps, port)
+    }
+
+    private suspend fun probeIpSet(candidateIps: Set<String>, port: Int): String? = withContext(dispatcherProvider.io) {
         val probeDeferreds = candidateIps.map { targetIp ->
             async(dispatcherProvider.io) {
                 try {
@@ -107,7 +150,6 @@ class NetworkProbeDataSource @Inject constructor(
                 }
             }
         }
-
         probeDeferreds.awaitAll().filterNotNull().firstOrNull()
     }
 
@@ -115,25 +157,36 @@ class NetworkProbeDataSource @Inject constructor(
         return "${i and 0xFF}.${i shr 8 and 0xFF}.${i shr 16 and 0xFF}.${i shr 24 and 0xFF}"
     }
 
+    suspend fun getLocalWifiIpAddresses(): List<String> = withContext(dispatcherProvider.io) {
+        getFilteredIpAddresses { name ->
+            val lower = name.lowercase()
+            lower.startsWith("wlan") || lower.startsWith("p2p") || lower.startsWith("ap") || lower.startsWith("softap")
+        }
+    }
+
+    suspend fun getLocalUsbTetherIpAddresses(): List<String> = withContext(dispatcherProvider.io) {
+        getFilteredIpAddresses { name ->
+            val lower = name.lowercase()
+            lower.startsWith("rndis") || lower.startsWith("usb") || lower.startsWith("ncm")
+        }
+    }
+
     suspend fun getLocalIpAddresses(): List<String> = withContext(dispatcherProvider.io) {
-        val foundIps = mutableListOf<String>()
+        getFilteredIpAddresses { true }
+    }
+
+    private suspend fun getFilteredIpAddresses(filter: (String) -> Boolean): List<String> = withContext(dispatcherProvider.io) {
         try {
-            val interfaces = NetworkInterface.getNetworkInterfaces()
-            while (interfaces.hasMoreElements()) {
-                val iface = interfaces.nextElement()
-                if (iface.isLoopback || !iface.isUp) continue
-                val addresses = iface.inetAddresses
-                while (addresses.hasMoreElements()) {
-                    val addr = addresses.nextElement()
-                    if (addr is Inet4Address && !addr.isLoopbackAddress) {
-                        val host = addr.hostAddress
-                        if (!host.isNullOrBlank() && !foundIps.contains(host)) {
-                            foundIps.add(host)
-                        }
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-        foundIps
+            NetworkInterface.getNetworkInterfaces()?.asSequence().orEmpty()
+                .filter { !it.isLoopback && it.isUp && filter(it.name) }
+                .flatMap { it.inetAddresses.asSequence() }
+                .filterIsInstance<Inet4Address>()
+                .mapNotNull { it.hostAddress }
+                .filter { it.isNotBlank() && !it.startsWith("127.") }
+                .distinct()
+                .toList()
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 }

@@ -1,7 +1,0 @@
-[package]
-name = "turbotransfer-transport-wifi-direct"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-turbotransfer-core = { path = "../../core" }

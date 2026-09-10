@@ -79,9 +79,6 @@ pub fn encode_frame_parts(msg: &Message) -> Result<(Vec<u8>, Option<&[u8]>), Pro
                 Message::Complete(d) => {
                     bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
                 }
-                Message::Heartbeat(d) => {
-                    bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-                }
                 Message::BatchChunkAck(d) => {
                     bincode::serialize_into(&mut out, d).map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
                 }

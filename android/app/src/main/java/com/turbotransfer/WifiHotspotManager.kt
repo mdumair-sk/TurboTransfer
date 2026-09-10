@@ -37,8 +37,8 @@ class WifiHotspotManager(private val context: Context) {
     private var reservation: WifiManager.LocalOnlyHotspotReservation? = null
     private var wifiLock: WifiManager.WifiLock? = null
     private var wakeLock: android.os.PowerManager.WakeLock? = null
+    private var isStarting = false
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-
     private val _state = MutableStateFlow(WifiHotspotState())
     val state = _state.asStateFlow()
 
@@ -49,8 +49,23 @@ class WifiHotspotManager(private val context: Context) {
      */
     @SuppressLint("MissingPermission")
     fun startHotspot(port: Int = 9876, onResult: (Boolean, String) -> Unit) {
+        if (_state.value.isActive && reservation != null) {
+            val info = _state.value.hotspotInfo
+            if (info != null) {
+                Log.i(TAG, "Hotspot already active: SSID='${info.ssid}'")
+                onResult(true, "Hotspot already active (${info.band})")
+                return
+            }
+        }
+        if (isStarting) {
+            Log.i(TAG, "Hotspot start already in progress")
+            return
+        }
+        isStarting = true
+
         val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
         if (wifiManager == null) {
+            isStarting = false
             val err = "WifiManager is unavailable on this device"
             _state.value = _state.value.copy(statusMessage = err)
             onResult(false, err)
@@ -89,6 +104,7 @@ class WifiHotspotManager(private val context: Context) {
             val callback = object : WifiManager.LocalOnlyHotspotCallback() {
                 override fun onStarted(res: WifiManager.LocalOnlyHotspotReservation?) {
                     super.onStarted(res)
+                    isStarting = false
                     reservation = res
 
                     val config = res?.wifiConfiguration
@@ -145,6 +161,7 @@ class WifiHotspotManager(private val context: Context) {
 
                 override fun onStopped() {
                     super.onStopped()
+                    isStarting = false
                     Log.i(TAG, "Local Hotspot Stopped")
                     stopControlServer()
                     _state.value = _state.value.copy(
@@ -156,6 +173,7 @@ class WifiHotspotManager(private val context: Context) {
 
                 override fun onFailed(reason: Int) {
                     super.onFailed(reason)
+                    isStarting = false
                     val msg = "Failed to start Hotspot (code $reason)"
                     Log.e(TAG, msg)
                     _state.value = _state.value.copy(statusMessage = msg)
@@ -191,6 +209,7 @@ class WifiHotspotManager(private val context: Context) {
                 wifiManager.startLocalOnlyHotspot(callback, null)
             }
         } catch (e: Exception) {
+            isStarting = false
             Log.e(TAG, "Exception starting Local Hotspot", e)
             onResult(false, "Exception: ${e.message}")
         }
@@ -205,9 +224,10 @@ class WifiHotspotManager(private val context: Context) {
             try {
                 // Credentials travel only over the ADB-forwarded loopback
                 // control channel, never to devices joined to the hotspot.
-                val server = ServerSocket(port, 1, InetAddress.getLoopbackAddress())
+                // Explicitly bind to IPv4 loopback (127.0.0.1) so ADB forward connects reliably.
+                val server = ServerSocket(port, 10, InetAddress.getByName("127.0.0.1"))
                 controlServerSocket = server
-                Log.i(TAG, "Hotspot Control Server listening on loopback:$port")
+                Log.i(TAG, "Hotspot Control Server listening on 127.0.0.1:$port")
                 val json = JSONObject()
                     .put("ssid", info.ssid)
                     .put("passphrase", info.passphrase)
@@ -225,6 +245,7 @@ class WifiHotspotManager(private val context: Context) {
                                 val out = s.getOutputStream()
                                 out.write((json + "\n").toByteArray(Charsets.UTF_8))
                                 out.flush()
+                                try { s.shutdownOutput() } catch (_: Exception) {}
                                 Log.i(TAG, "Sent hotspot credentials to discovery client: ${socket.inetAddress.hostAddress}")
                             }
                         } catch (e: Exception) {
@@ -255,6 +276,7 @@ class WifiHotspotManager(private val context: Context) {
      * Tears down the active Hotspot and closes all sockets.
      */
     fun stopHotspot() {
+        isStarting = false
         stopControlServer()
         try {
             if (wifiLock?.isHeld == true) {

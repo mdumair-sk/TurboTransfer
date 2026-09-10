@@ -7,7 +7,7 @@ pub use transport::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{HeartbeatData, Message};
+    use crate::protocol::{HelloData, Message};
     use crate::transport::{Transport, TransportKind, TransportStatus};
     use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};
@@ -53,15 +53,19 @@ emulator-5554	offline transport_id:2
         assert_eq!(client.status(), TransportStatus::Connected);
         assert!(client.is_connected());
 
-        // Send Heartbeat
-        let hb = Message::Heartbeat(HeartbeatData { sequence: 42 });
-        client.send_frame(&hb).await.unwrap();
+        // Send Hello
+        let hello = Message::Hello(HelloData {
+            device_id: uuid::Uuid::nil(),
+            device_name: "TestDevice".to_string(),
+            protocol_version: 1,
+        });
+        client.send_frame(&hello).await.unwrap();
         assert!(client.bytes_sent() > 0);
 
         let received = server.receive_frame().await.unwrap().unwrap();
         match received {
-            Message::Heartbeat(msg) => assert_eq!(msg.sequence, 42),
-            _ => panic!("Expected Heartbeat message"),
+            Message::Hello(msg) => assert_eq!(msg.protocol_version, 1),
+            _ => panic!("Expected Hello message"),
         }
 
         // Close
@@ -70,7 +74,7 @@ emulator-5554	offline transport_id:2
         assert!(!client.is_connected());
 
         // Subsequent sends must fail
-        assert!(client.send_frame(&hb).await.is_err());
+        assert!(client.send_frame(&hello).await.is_err());
     }
 
     #[tokio::test]

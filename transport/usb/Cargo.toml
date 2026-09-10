@@ -1,7 +1,0 @@
-[package]
-name = "turbotransfer-transport-usb"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-turbotransfer-core = { path = "../../core" }

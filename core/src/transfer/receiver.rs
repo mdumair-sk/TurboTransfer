@@ -13,7 +13,7 @@ use super::registry::{
 };
 use super::sender::{default_data_dir, find_resumable_transfer, DEFAULT_LISTEN_ADDR};
 use super::session::TransferSessionError;
-use super::tracker::{ChunkTracker, InMemoryChunkTracker};
+use super::tracker::InMemoryChunkTracker;
 use crate::checksum::{compute_file_crc32c, compute_xxhash64};
 use crate::manifest::{MetaActor, TransferMeta, TransferRole, TransferStatus, TransportType};
 use crate::protocol::{
@@ -136,20 +136,32 @@ pub async fn enter_receive_mode(
     {
         if address.is_none() || address.as_deref() == Some(DEFAULT_LISTEN_ADDR) {
             crate::util::runtime::spawn_task(async {
+                log::info!("[ReceiveMode] Starting auto hotspot trigger and discovery...");
+                let mut target_serial = None;
                 if let Ok(devices) = UsbTransport::list_adb_devices() {
                     for dev in devices {
                         if dev.state == "device" {
                             let _ = UsbTransport::setup_default_adb_tunnels(&dev.serial);
                             let _ = UsbTransport::trigger_android_hotspot(&dev.serial);
+                            target_serial = Some(dev.serial);
+                            break;
                         }
                     }
                 }
 
-                if let Some(config) = WifiDirectTransport::discover_android_hotspot(None).await {
+                log::info!("[ReceiveMode] Polling hotspot with target_serial={:?}...", target_serial);
+                if let Some(config) = WifiDirectTransport::discover_android_hotspot(target_serial.as_deref()).await {
+                    log::info!("[ReceiveMode] Discovered hotspot: SSID='{}', associating Windows WLAN...", config.ssid);
                     #[cfg(target_os = "windows")]
                     {
-                        let _ = WifiDirectTransport::associate_wlan_windows(&config).await;
+                        if let Err(e) = WifiDirectTransport::associate_wlan_windows(&config).await {
+                            log::warn!("[ReceiveMode] Failed to associate Windows WLAN: {}", e);
+                        } else {
+                            log::info!("[ReceiveMode] Successfully associated Windows WLAN with '{}'!", config.ssid);
+                        }
                     }
+                } else {
+                    log::warn!("[ReceiveMode] discover_android_hotspot returned None!");
                 }
             });
         }
@@ -167,6 +179,7 @@ pub async fn enter_receive_mode(
                             let ip_str = peer_addr.ip().to_string();
                             let is_usb = peer_addr.ip().is_loopback()
                                 || ip_str.starts_with("10.125.")
+                                || ip_str.starts_with("10.104.")
                                 || ip_str.starts_with("192.168.42.");
                             let tx = completion_tx.clone();
                             let ddir = dest_dir.clone();
@@ -419,15 +432,24 @@ pub(crate) async fn handle_incoming_receive_transport(
         let frame = match frame_res {
             Ok(Some(f)) => f,
             Ok(None) => {
-                session.telemetry.record_channel_disconnect(ch_name, "Peer disconnected / EOF");
+                let is_done = session.completed_chunks_count.load(Ordering::Relaxed) >= offer.total_chunks;
+                if is_done {
+                    debug!("Channel {} closed gracefully after transfer completion", ch_name);
+                } else {
+                    session.telemetry.record_channel_disconnect(ch_name, "Peer disconnected / EOF");
+                }
                 break;
             }
             Err(e) => {
-                session.telemetry.record_channel_disconnect(ch_name, &e.to_string());
+                let is_done = session.completed_chunks_count.load(Ordering::Relaxed) >= offer.total_chunks;
+                if is_done {
+                    debug!("Channel {} closed after transfer completion: {}", ch_name, e);
+                } else {
+                    session.telemetry.record_channel_disconnect(ch_name, &e.to_string());
+                }
                 return Err(TransferSessionError::Transport(e));
             }
         };
-
         match frame {
             Message::ChunkData(chunk_data) => {
                 let t_v0 = std::time::Instant::now();
@@ -684,12 +706,6 @@ pub(crate) async fn handle_incoming_receive_transport(
                     .lock()
                     .remove(&cancel_data.transfer_id);
                 break;
-            }
-            Message::Heartbeat(hb) => {
-                let reply = Message::Heartbeat(crate::protocol::HeartbeatData {
-                    sequence: hb.sequence + 1,
-                });
-                transport.send_frame(&reply).await?;
             }
             _ => {}
         }

@@ -26,8 +26,6 @@ pub const MSG_TYPE_RESUME: u8 = 0x09;
 pub const MSG_TYPE_CANCEL: u8 = 0x0A;
 /// Message type code for `Complete` (0x0B)
 pub const MSG_TYPE_COMPLETE: u8 = 0x0B;
-/// Message type code for `Heartbeat` (0x0C)
-pub const MSG_TYPE_HEARTBEAT: u8 = 0x0C;
 /// Message type code for `BatchChunkAck` (0x0D)
 pub const MSG_TYPE_BATCH_CHUNK_ACK: u8 = 0x0D;
 
@@ -110,10 +108,6 @@ pub struct CompleteData {
     pub file_checksum: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HeartbeatData {
-    pub sequence: u64,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BatchChunkAckData {
@@ -137,7 +131,6 @@ pub enum Message {
     Resume(ResumeData),
     Cancel(CancelData),
     Complete(CompleteData),
-    Heartbeat(HeartbeatData),
     BatchChunkAck(BatchChunkAckData),
 }
 
@@ -156,7 +149,6 @@ impl Message {
             Message::Resume(_) => MSG_TYPE_RESUME,
             Message::Cancel(_) => MSG_TYPE_CANCEL,
             Message::Complete(_) => MSG_TYPE_COMPLETE,
-            Message::Heartbeat(_) => MSG_TYPE_HEARTBEAT,
             Message::BatchChunkAck(_) => MSG_TYPE_BATCH_CHUNK_ACK,
         }
     }
@@ -259,11 +251,6 @@ impl Message {
                     .map_err(|e| ProtocolError::DeserializationError(e.to_string()))?;
                 Message::Complete(data)
             }
-            MSG_TYPE_HEARTBEAT => {
-                let data: HeartbeatData = bincode::deserialize(payload)
-                    .map_err(|e| ProtocolError::DeserializationError(e.to_string()))?;
-                Message::Heartbeat(data)
-            }
             MSG_TYPE_BATCH_CHUNK_ACK => {
                 let data: BatchChunkAckData = match bincode::deserialize(payload) {
                     Ok(d) => d,
@@ -323,9 +310,6 @@ impl Message {
                 bincode::serialize(d).map_err(|e| ProtocolError::SerializationError(e.to_string()))
             }
             Message::Complete(d) => {
-                bincode::serialize(d).map_err(|e| ProtocolError::SerializationError(e.to_string()))
-            }
-            Message::Heartbeat(d) => {
                 bincode::serialize(d).map_err(|e| ProtocolError::SerializationError(e.to_string()))
             }
             Message::BatchChunkAck(d) => {

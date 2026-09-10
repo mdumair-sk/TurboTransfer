@@ -2,27 +2,33 @@ package com.turbotransfer.data.repository
 
 import com.turbotransfer.data.source.local.HistoryLocalDataSource
 import com.turbotransfer.domain.model.HistoryItem
-import com.turbotransfer.domain.repository.HistoryRepository
 import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class HistoryRepositoryImpl @Inject constructor(
-    private val localDataSource: HistoryLocalDataSource
-) : HistoryRepository {
+open class HistoryRepositoryImpl(
+    private val localDataSource: HistoryLocalDataSource?,
+    @Suppress("UNUSED_PARAMETER") dummy: Unit?
+) {
+    @Inject
+    constructor(
+        localDataSource: HistoryLocalDataSource
+    ) : this(localDataSource, null)
 
-    override val historyFlow: StateFlow<List<HistoryItem>> = localDataSource.historyFlow
+    constructor() : this(null, null)
 
-    override fun addTransferRecord(record: HistoryItem) {
-        localDataSource.addTransferRecord(record)
+    open val historyFlow: StateFlow<List<HistoryItem>> by lazy { localDataSource?.historyFlow ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList()) }
+
+    open fun addTransferRecord(record: HistoryItem) {
+        localDataSource?.addTransferRecord(record)
     }
 
-    override fun deleteRecord(id: String) {
-        localDataSource.deleteRecord(id)
+    open fun deleteRecord(id: String) {
+        localDataSource?.deleteRecord(id)
     }
 
-    override fun clearHistory() {
-        localDataSource.clearHistory()
+    open fun clearHistory() {
+        localDataSource?.clearHistory()
     }
 }

@@ -1,51 +1,5 @@
-use std::time::Instant;
-use turbotransfer_core::scheduler::buffer_pool::BufferPool;
 use turbotransfer_core::scheduler::model::ChannelPerformanceModel;
 use turbotransfer_core::scheduler::tracker::ChannelTracker;
-
-/// Benchmark chunk sizes across memory allocation count and buffer pool reuse efficiency.
-#[tokio::test]
-async fn test_chunk_size_memory_and_allocation_bench() {
-    let sizes = [
-        512 * 1024,      // 512 KiB
-        1024 * 1024,     // 1 MiB
-        2 * 1024 * 1024, // 2 MiB
-        4 * 1024 * 1024, // 4 MiB
-        8 * 1024 * 1024, // 8 MiB
-    ];
-
-    let total_file_bytes = 64 * 1024 * 1024; // 64 MB simulation
-
-    println!("\n=== Chunk Size Memory & Recycling Benchmark (64 MB Total) ===");
-    for &chunk_sz in &sizes {
-        let total_chunks = (total_file_bytes + chunk_sz - 1) / chunk_sz;
-        let pool = BufferPool::new(8, chunk_sz);
-
-        let t0 = Instant::now();
-        let mut reused_count = 0;
-
-        for _ in 0..total_chunks {
-            let buf = pool.acquire().await;
-            if buf.as_slice().len() <= chunk_sz {
-                reused_count += 1;
-            }
-            drop(buf);
-        }
-        let elapsed_us = t0.elapsed().as_micros();
-
-        let reuse_ratio = (reused_count as f64) / (total_chunks as f64) * 100.0;
-        println!(
-            "Chunk Size: {:>7} bytes ({:.1} MB) | Total Chunks: {:>4} | Acquire/Release: {:>4} us | Reuse Ratio: {:.1}%",
-            chunk_sz,
-            (chunk_sz as f64) / (1024.0 * 1024.0),
-            total_chunks,
-            elapsed_us,
-            reuse_ratio
-        );
-
-        assert_eq!(reuse_ratio, 100.0, "Buffer pool should achieve 100% reuse after warm up");
-    }
-}
 
 /// Benchmark scheduler throughput across configurations: USB-only, Wi-Fi 1..4 streams, and Bonded USB+Wi-Fi.
 #[test]
