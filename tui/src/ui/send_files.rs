@@ -6,17 +6,15 @@ use ratatui::Frame;
 
 use crate::app::AppState;
 
-pub const SEND_OPTIONS: [(&str, &str, &str); 3] = [
+pub const SEND_OPTIONS: [(&str, &str, &str); 1] = [
     ("Browse Filesystem", "Open interactive directory explorer to select files", "B"),
-    ("Enter File Path", "Type or paste an exact absolute path directly into console", "P"),
-    ("Recent Files", "Select from recently sent files and historical transfers", "R"),
 ];
 
 pub fn render_send_files(f: &mut Frame, app: &AppState, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(7), // Options list in one clean block
+            Constraint::Length(5), // Options list in one clean block
             Constraint::Min(6),    // Selected File Summary
         ])
         .split(area);

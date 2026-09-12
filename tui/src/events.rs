@@ -1,11 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use std::path::PathBuf;
 use turbotransfer_core::transfer::TransportPreference;
 
 use crate::app::{AppState, Screen, SettingsTab};
 use crate::ui::benchmark::BENCHMARK_SIZES;
 use crate::ui::main_menu::MAIN_MENU_ITEMS;
-use crate::ui::send_files::SEND_OPTIONS;
 use crate::ui::transport_selection::TRANSPORTS;
 
 /// Handles incoming key events across the global application lifecycle (§13).
@@ -64,30 +62,12 @@ pub fn handle_key_event(app: &mut AppState, key: KeyEvent) {
                 app.refresh_browser_entries();
                 app.navigate_to(Screen::FileBrowser);
             }
-            KeyCode::Char('p') | KeyCode::Char('P') => {
-                app.selected_file_path = Some(PathBuf::from("sample_transfer_file.bin"));
-                app.status_message = Some("Path entered manually".to_string());
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                app.prev_item(SEND_OPTIONS.len());
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                app.next_item(SEND_OPTIONS.len());
-            }
             KeyCode::Enter => {
                 if app.selected_file_path.is_some() {
                     app.navigate_to(Screen::DeviceSelection);
                 } else {
-                    match app.selected_index {
-                        0 => {
-                            app.refresh_browser_entries();
-                            app.navigate_to(Screen::FileBrowser);
-                        }
-                        1 => {
-                            app.selected_file_path = Some(PathBuf::from("manual_input_file.bin"));
-                        }
-                        _ => {}
-                    }
+                    app.refresh_browser_entries();
+                    app.navigate_to(Screen::FileBrowser);
                 }
             }
             KeyCode::Esc => app.navigate_to(Screen::MainMenu),
@@ -255,18 +235,15 @@ pub fn handle_key_event(app: &mut AppState, key: KeyEvent) {
         Screen::Transfers => match key.code {
             KeyCode::Tab | KeyCode::Right => app.next_transfers_tab(),
             KeyCode::BackTab | KeyCode::Left => app.prev_transfers_tab(),
-            KeyCode::Char('r') | KeyCode::Char('R') => app.navigate_to(Screen::Resume),
-            KeyCode::Char('d') | KeyCode::Char('D') => app.navigate_to(Screen::TransferDetails),
-            KeyCode::Char('c') | KeyCode::Char('C') => app.cancel_active(),
-            KeyCode::Esc => app.navigate_to(Screen::MainMenu),
-            _ => {}
-        },
-
-        Screen::Resume => match key.code {
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                app.transfers_tab = crate::app::TransfersTab::Resumable;
+            }
             KeyCode::Enter => {
                 app.resume_active();
             }
-            KeyCode::Esc => app.navigate_to(Screen::Transfers),
+            KeyCode::Char('d') | KeyCode::Char('D') => app.navigate_to(Screen::TransferDetails),
+            KeyCode::Char('c') | KeyCode::Char('C') => app.cancel_active(),
+            KeyCode::Esc => app.navigate_to(Screen::MainMenu),
             _ => {}
         },
 
@@ -384,23 +361,7 @@ pub fn handle_key_event(app: &mut AppState, key: KeyEvent) {
                 app.settings_item = 0;
             }
             KeyCode::Char('2') => {
-                app.settings_tab = SettingsTab::Transfer;
-                app.settings_item = 0;
-            }
-            KeyCode::Char('3') => {
-                app.settings_tab = SettingsTab::Performance;
-                app.settings_item = 0;
-            }
-            KeyCode::Char('4') => {
                 app.settings_tab = SettingsTab::Storage;
-                app.settings_item = 0;
-            }
-            KeyCode::Char('5') => {
-                app.settings_tab = SettingsTab::Security;
-                app.settings_item = 0;
-            }
-            KeyCode::Char('6') => {
-                app.settings_tab = SettingsTab::Interface;
                 app.settings_item = 0;
             }
             KeyCode::Up => {
@@ -417,21 +378,6 @@ pub fn handle_key_event(app: &mut AppState, key: KeyEvent) {
             _ => {}
         },
 
-        _ => match key.code {
-            KeyCode::Esc => {
-                app.navigate_to(Screen::MainMenu);
-            }
-            KeyCode::Char('1') => app.navigate_to(Screen::SendFiles),
-            KeyCode::Char('2') => {
-                app.start_receive_mode();
-                app.navigate_to(Screen::ReceiveFiles);
-            }
-            KeyCode::Char('3') => app.navigate_to(Screen::Devices),
-            KeyCode::Char('4') => app.navigate_to(Screen::Transfers),
-            KeyCode::Char('5') => app.navigate_to(Screen::Benchmark),
-            KeyCode::Char('6') => app.navigate_to(Screen::Settings),
-            _ => {}
-        },
     }
 }
 

@@ -3,10 +3,8 @@ pub mod benchmark_results;
 pub mod device_selection;
 pub mod devices;
 pub mod file_browser;
-pub mod incoming_prompt;
 pub mod main_menu;
 pub mod receive_files;
-pub mod resume;
 pub mod send_files;
 pub mod settings;
 pub mod transfer_details;
@@ -47,18 +45,11 @@ pub fn render_ui(f: &mut Frame, app: &AppState) {
         Screen::TransferScreen => transfer_screen::render_transfer_screen(f, app, chunks[1]),
         Screen::TransferDetails => transfer_details::render_transfer_details(f, app, chunks[1]),
         Screen::ReceiveFiles => receive_files::render_receive_files(f, app, chunks[1]),
-        Screen::IncomingPrompt => incoming_prompt::render_incoming_prompt(f, app, chunks[1]),
         Screen::Devices => devices::render_devices(f, app, chunks[1]),
         Screen::Transfers => transfers::render_transfers(f, app, chunks[1]),
-        Screen::Resume => resume::render_resume(f, app, chunks[1]),
         Screen::Benchmark => benchmark::render_benchmark(f, app, chunks[1]),
         Screen::BenchmarkResults => benchmark_results::render_benchmark_results(f, app, chunks[1]),
         Screen::Settings => settings::render_settings(f, app, chunks[1]),
-    }
-
-    // Render modal overlay if incoming prompt is active
-    if app.current_screen == Screen::ReceiveFiles && app.incoming_prompt.is_some() {
-        incoming_prompt::render_incoming_prompt(f, app, size);
     }
 
     // 3. Bottom Footer Shortcuts
@@ -75,10 +66,8 @@ fn render_header(f: &mut Frame, app: &AppState, area: Rect) {
         Screen::TransferScreen => "Transfer Monitor",
         Screen::TransferDetails => "Transfer Diagnostics",
         Screen::ReceiveFiles => "Receive Mode",
-        Screen::IncomingPrompt => "Incoming Transfer Request",
         Screen::Devices => "Discovered Devices",
         Screen::Transfers => "Transfers History",
-        Screen::Resume => "Cold Resume Selector",
         Screen::Benchmark => "Benchmark Tool",
         Screen::BenchmarkResults => "Benchmark Results",
         Screen::Settings => "Settings",
@@ -196,12 +185,6 @@ fn render_footer(f: &mut Frame, app: &AppState, area: Rect) {
             Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
             Span::styled("Dashboard", Style::default().fg(Color::Gray)),
         ],
-        Screen::Resume => vec![
-            Span::styled(" [Enter] ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::styled("Resume Selected  ", Style::default().fg(Color::Gray)),
-            Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-            Span::styled("Back", Style::default().fg(Color::Gray)),
-        ],
         Screen::Benchmark => vec![
             Span::styled(" [↑/↓] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
             Span::styled("Select Transport  ", Style::default().fg(Color::Gray)),
@@ -225,12 +208,6 @@ fn render_footer(f: &mut Frame, app: &AppState, area: Rect) {
             Span::styled("Toggle  ", Style::default().fg(Color::Gray)),
             Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
             Span::styled("Dashboard", Style::default().fg(Color::Gray)),
-        ],
-        _ => vec![
-            Span::styled(" [Esc] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-            Span::styled("Back  ", Style::default().fg(Color::Gray)),
-            Span::styled(" [1-6] ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-            Span::styled("Dashboard Shortcuts", Style::default().fg(Color::Gray)),
         ],
     };
 

@@ -1912,6 +1912,9 @@ data class FfiTransferProgress (
     var `wifiThroughputBps`: kotlin.Double, 
     var `aggregateThroughputBps`: kotlin.Double, 
     var `etaSeconds`: kotlin.ULong?, 
+    var `durationSeconds`: kotlin.Double, 
+    var `usbBytesTransferred`: kotlin.ULong, 
+    var `wifiBytesTransferred`: kotlin.ULong, 
     var `totalChunks`: kotlin.UInt, 
     var `completedChunks`: kotlin.UInt, 
     var `retryCount`: kotlin.ULong, 
@@ -1938,6 +1941,9 @@ public object FfiConverterTypeFfiTransferProgress: FfiConverterRustBuffer<FfiTra
             FfiConverterDouble.read(buf),
             FfiConverterDouble.read(buf),
             FfiConverterOptionalULong.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
             FfiConverterUInt.read(buf),
             FfiConverterUInt.read(buf),
             FfiConverterULong.read(buf),
@@ -1957,6 +1963,9 @@ public object FfiConverterTypeFfiTransferProgress: FfiConverterRustBuffer<FfiTra
             FfiConverterDouble.allocationSize(value.`wifiThroughputBps`) +
             FfiConverterDouble.allocationSize(value.`aggregateThroughputBps`) +
             FfiConverterOptionalULong.allocationSize(value.`etaSeconds`) +
+            FfiConverterDouble.allocationSize(value.`durationSeconds`) +
+            FfiConverterULong.allocationSize(value.`usbBytesTransferred`) +
+            FfiConverterULong.allocationSize(value.`wifiBytesTransferred`) +
             FfiConverterUInt.allocationSize(value.`totalChunks`) +
             FfiConverterUInt.allocationSize(value.`completedChunks`) +
             FfiConverterULong.allocationSize(value.`retryCount`) +
@@ -1975,6 +1984,9 @@ public object FfiConverterTypeFfiTransferProgress: FfiConverterRustBuffer<FfiTra
             FfiConverterDouble.write(value.`wifiThroughputBps`, buf)
             FfiConverterDouble.write(value.`aggregateThroughputBps`, buf)
             FfiConverterOptionalULong.write(value.`etaSeconds`, buf)
+            FfiConverterDouble.write(value.`durationSeconds`, buf)
+            FfiConverterULong.write(value.`usbBytesTransferred`, buf)
+            FfiConverterULong.write(value.`wifiBytesTransferred`, buf)
             FfiConverterUInt.write(value.`totalChunks`, buf)
             FfiConverterUInt.write(value.`completedChunks`, buf)
             FfiConverterULong.write(value.`retryCount`, buf)

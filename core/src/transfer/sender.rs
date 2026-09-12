@@ -106,6 +106,45 @@ pub fn find_resumable_transfer(target_id: Option<Uuid>) -> Option<(PathBuf, Tran
     candidate.map(|(p, m, _)| (p, m))
 }
 
+/// Prepares Android and PC for sending files from PC to Android:
+/// 1. Removes any stale ADB reverse tunnel on port 9876.
+/// 2. Sets up ADB forward tunnels on ports 9876 (data) and 9875 (hotspot control channel).
+/// 3. Autostarts the Android app into Receive Mode (switches to tab 1, starts hotspot, starts receiver).
+/// 4. Discovers hotspot credentials and connects Windows Wi-Fi to the Android hotspot.
+pub fn prepare_send_mode() {
+    #[cfg(not(target_os = "android"))]
+    {
+        crate::util::runtime::spawn_task(async {
+            log::info!("[SendMode] Starting auto Android receive trigger and Wi-Fi discovery...");
+            let mut target_serial = None;
+            if let Ok(devices) = UsbTransport::list_adb_devices() {
+                for dev in devices {
+                    if dev.state == "device" {
+                        let _ = UsbTransport::remove_adb_reverse(&dev.serial, 9876);
+                        let _ = UsbTransport::setup_adb_forward(&dev.serial, 9876, 9876);
+                        let _ = UsbTransport::setup_adb_forward(&dev.serial, 9875, 9875);
+                        let _ = UsbTransport::trigger_android_receive(&dev.serial);
+                        target_serial = Some(dev.serial);
+                        break;
+                    }
+                }
+            }
+
+            if let Some(config) = WifiDirectTransport::discover_android_hotspot(target_serial.as_deref()).await {
+                log::info!("[SendMode] Discovered hotspot: SSID='{}', associating Windows WLAN...", config.ssid);
+                #[cfg(target_os = "windows")]
+                {
+                    if let Err(e) = WifiDirectTransport::associate_wlan_windows(&config).await {
+                        log::warn!("[SendMode] Failed to associate Windows WLAN: {}", e);
+                    } else {
+                        log::info!("[SendMode] Successfully associated Windows WLAN with '{}'!", config.ssid);
+                    }
+                }
+            }
+        });
+    }
+}
+
 /// Connects all available transport channels according to the preference and network environment.
 pub async fn resolve_and_connect_transports(
     transport_pref: TransportPreference,
@@ -126,6 +165,38 @@ pub async fn resolve_and_connect_transports_with_streams(
     let addr = address.unwrap_or(&addr_default);
     let mut transports: Vec<(Box<dyn Transport>, bool)> = Vec::new();
     let mut transport_names: Vec<String> = Vec::new();
+
+    #[cfg(not(target_os = "android"))]
+    {
+        if let Ok(devices) = UsbTransport::list_adb_devices() {
+            for dev in devices {
+                if dev.state == "device" {
+                    let _ = UsbTransport::remove_adb_reverse(&dev.serial, 9876);
+                    let _ = UsbTransport::setup_adb_forward(&dev.serial, 9876, 9876);
+                    let _ = UsbTransport::setup_adb_forward(&dev.serial, 9875, 9875);
+                    if !UsbTransport::is_receiver_listening(&dev.serial, 9876) {
+                        let _ = UsbTransport::trigger_android_receive(&dev.serial);
+                        for _ in 0..10 {
+                            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                            if UsbTransport::is_receiver_listening(&dev.serial, 9876) {
+                                break;
+                            }
+                        }
+                    }
+                    #[cfg(target_os = "windows")]
+                    {
+                        if let Some(config) = WifiDirectTransport::probe_hotspot_control_channel(std::time::Duration::from_millis(250)).await {
+                            let cur_ssid = WifiDirectTransport::get_current_windows_wifi_ssid();
+                            if cur_ssid.as_deref() != Some(&config.ssid) {
+                                let _ = WifiDirectTransport::associate_wlan_windows(&config).await;
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
 
     match transport_pref {
         TransportPreference::UsbOnly => {

@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 use super::registry::{
     get_registry, get_transfer_actor_handle, record_channel_bytes, register_active_transfer,
-    set_transfer_actor_handle, set_transfer_status, transfer_control_status,
-    update_transfer_progress,
+    reset_transfer_start_time, set_transfer_actor_handle, set_transfer_status,
+    transfer_control_status, update_transfer_progress,
 };
 use super::sender::{default_data_dir, find_resumable_transfer, DEFAULT_LISTEN_ADDR};
 use super::session::TransferSessionError;
@@ -522,10 +522,13 @@ pub(crate) async fn handle_incoming_receive_transport(
                     session.chunk_crcs.lock().insert(chunk_data.chunk_id, (chunk_crc, payload_len));
                 }
 
-                let total_b = session
+                let prev_b = session
                     .bytes_recv_total
-                    .fetch_add(chunk_data.payload_length as u64, Ordering::Relaxed)
-                    + chunk_data.payload_length as u64;
+                    .fetch_add(chunk_data.payload_length as u64, Ordering::Relaxed);
+                if prev_b == 0 {
+                    reset_transfer_start_time(chunk_data.transfer_id);
+                }
+                let total_b = prev_b + chunk_data.payload_length as u64;
                 let total_c = session.completed_chunks_count.fetch_add(1, Ordering::Relaxed) + 1;
 
                 if !session.is_sender_in_same_process {

@@ -55,6 +55,9 @@ class ReceiveViewModel @Inject constructor(
                 _uiState.update { it.copy(activeIncomingSession = if (session?.isOutgoing == false) session else null) }
             }
         }
+        // Auto-start receive mode and hotspot on screen entry
+        toggleReceiveMode("0.0.0.0:9876")
+
 
         // Network & USB probe loop
         viewModelScope.launch {

@@ -53,32 +53,10 @@ pub fn render_settings(f: &mut Frame, app: &AppState, area: Rect) {
         SettingsTab::Transport => {
             lines.push(render_setting_row("Transport Priority", &app.settings.transport_pref, app.settings_item == 0, "Default channel: Automatic (Combined multipath)"));
             lines.push(render_setting_row("Wi-Fi Direct Band", &app.settings.p2p_band, app.settings_item == 1, "5 GHz primary for wire-speed (~35 MB/s); 2.4 GHz fallback"));
-            lines.push(render_setting_row("ADB Forward Local Port", "9876", false, "Local TCP port bridged over USB cable"));
-            lines.push(render_setting_row("ADB Reconnect Poll Interval", "2.0s", false, "Polling cadence for detecting reattached devices"));
-        }
-        SettingsTab::Transfer => {
-            lines.push(render_setting_row("Default Chunk Size", "Dynamic (256K - 4M)", false, "Auto-selected based on file size per TRD §4a"));
-            lines.push(render_setting_row("Scheduling Strategy", "Rate-Adaptive (AIMD)", false, "Faster transports naturally pull more chunks"));
-            lines.push(render_setting_row("Per-Chunk Checksum", "xxHash64", false, "High-performance checksum computed per chunk frame"));
-            lines.push(render_setting_row("File-Level Checksum", "CRC32c", false, "Reconstructed file verification before final rename"));
-        }
-        SettingsTab::Performance => {
-            lines.push(render_setting_row("Pipeline Sizing", "AIMD Dynamic Window", false, "Auto-converges to optimal channel bandwidth-delay product"));
-            lines.push(render_setting_row("Buffer Strategy", "Zero-Copy Slice Recycling", false, "Bounded RAM limit for zero-copy chunk staging"));
-            lines.push(render_setting_row("TCP Socket Buffer", "High-BDP Tuned (4-8 MB)", false, "OS send/receive buffer capacity for saturation"));
         }
         SettingsTab::Storage => {
-            lines.push(render_setting_row("Default Download Directory", &app.settings.download_dir, app.settings_item == 0, "Target folder where received files are saved"));
-            lines.push(render_setting_row("Sparse .part Pre-allocation", "Enabled", false, "Pre-allocates full file size for out-of-order writes"));
-            lines.push(render_setting_row("Metadata Directory", "%APPDATA%/turbotransfer", false, "Persistent meta.json and settings.json storage location"));
-        }
-        SettingsTab::Security => {
-            lines.push(render_setting_row("Pairing Trust State", "Local Device (Authorized)", false, "Trusts devices with active ADB authorization or Wi-Fi Direct"));
-            lines.push(render_setting_row("Payload Encryption", "Cleartext (Personal Network)", false, "High-speed local transfers; PIN encryption in enterprise mode"));
-        }
-        SettingsTab::Interface => {
-            lines.push(render_setting_row("TUI Theme", "Dark Minimalist", false, "High-Contrast Minimalist Monochrome"));
-            lines.push(render_setting_row("Progress Polling Interval", &format!("{} ms", app.settings.poll_interval_ms), false, "Actor flush synchronization frequency"));
+            lines.push(render_setting_row("Default Download Directory", &app.settings.download_dir, false, "Target folder where received files are saved"));
+            lines.push(render_setting_row("Progress Polling Interval", &format!("{} ms", app.settings.poll_interval_ms), false, "UI refresh cadence"));
         }
     }
 

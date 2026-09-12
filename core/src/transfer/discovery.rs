@@ -70,14 +70,29 @@ pub(crate) fn get_windows_hotspot_probe_ips() -> Vec<String> {
                         } else if in_wifi_section && trimmed.starts_with("Default Gateway") {
                             if let Some(val) = trimmed.split(':').nth(1) {
                                 let gw = val.trim();
-                                if !gw.is_empty() && gw.starts_with("192.168.") {
-                                    ips.push(gw.to_string());
+                                if !gw.is_empty() {
+                                    ips.push(format!("{}:9876", gw));
                                 }
                             }
                             in_wifi_section = false;
                         } else if in_wifi_section && trimmed.is_empty() {
                             in_wifi_section = false;
                         }
+                    }
+                }
+                // Also query resolve_windows_all_gateways() to capture all active interface gateways
+                for gw in crate::transport::WifiDirectTransport::resolve_windows_all_gateways() {
+                    let formatted = format!("{}:9876", gw);
+                    if !ips.contains(&formatted) {
+                        ips.push(formatted);
+                    }
+                }
+
+                // Standard fallback Android AP gateways
+                for fallback in ["192.168.43.1:9876", "192.168.49.1:9876"] {
+                    let fallback_str = fallback.to_string();
+                    if !ips.contains(&fallback_str) {
+                        ips.push(fallback_str);
                     }
                 }
             }
@@ -101,13 +116,14 @@ pub fn get_devices() -> Vec<DeviceInfo> {
                     let _ = UsbTransport::setup_receive_adb_tunnels(&d.serial);
                     true
                 } else {
+                    let _ = UsbTransport::remove_adb_reverse(&d.serial, 9876);
                     let _ = UsbTransport::setup_adb_forward(&d.serial, 9876, 9876);
                     let _ = UsbTransport::setup_adb_forward(&d.serial, 9875, 9875);
                     if UsbTransport::is_receiver_listening(&d.serial, 9876) {
                         true
                     } else {
                         let _ = UsbTransport::trigger_android_receive(&d.serial);
-                        std::thread::sleep(std::time::Duration::from_millis(80));
+                        std::thread::sleep(std::time::Duration::from_millis(150));
                         UsbTransport::is_receiver_listening(&d.serial, 9876)
                     }
                 };
@@ -118,7 +134,7 @@ pub fn get_devices() -> Vec<DeviceInfo> {
                     use std::time::Duration;
                     let mut wifi_ready = false;
                     let addr = SocketAddr::from(([127, 0, 0, 1], 9875));
-                    if let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(50)) {
+                    if let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(250)) {
                         use std::io::{BufRead, BufReader};
                         let mut reader = BufReader::new(&mut stream);
                         let mut line = String::new();

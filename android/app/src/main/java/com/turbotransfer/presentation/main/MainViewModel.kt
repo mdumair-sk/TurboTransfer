@@ -69,6 +69,11 @@ class MainViewModel @Inject constructor(
     }
 
     fun selectTab(index: Int) {
+        if (_selectedTab.value == 1 && index != 1) {
+            viewModelScope.launch {
+                transferRepository.stopReceiveMode()
+            }
+        }
         _selectedTab.value = index
     }
 
@@ -80,7 +85,11 @@ class MainViewModel @Inject constructor(
     }
 
     fun handleStartHotspotBroadcast() {
-        hotspotRepository.startHotspot(9876) { }
+        viewModelScope.launch {
+            transferRepository.stopReceiveMode()
+            hotspotRepository.startHotspot(9876) { }
+            _selectedTab.value = 0
+        }
     }
 
     fun handleStopHotspotBroadcast() {

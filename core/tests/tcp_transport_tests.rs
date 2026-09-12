@@ -262,3 +262,37 @@ async fn test_tcp_transport_disconnect_handling() {
     s.unwrap();
     c.unwrap();
 }
+
+#[tokio::test]
+async fn test_tcp_transport_connect_normalizes_missing_port() {
+    // If port 9876 can be bound, test full connection handshake with normalized address.
+    // Otherwise, verify the error message proves port 9876 was appended.
+    match TcpListenerTransport::bind("127.0.0.1:9876").await {
+        Ok(listener) => {
+            let server = tokio::spawn(async move {
+                let (transport, _) = listener.accept().await.unwrap();
+                assert!(transport.is_connected());
+            });
+            let client = tokio::spawn(async move {
+                let transport = TcpTransport::connect("127.0.0.1").await.unwrap();
+                assert_eq!(transport.peer_addr().map(|a| a.port()), Some(9876));
+            });
+            let (s, c) = tokio::join!(server, client);
+            s.unwrap();
+            c.unwrap();
+        }
+        Err(_) => match TcpTransport::connect("127.0.0.1").await {
+            Err(TransportError::Disconnected(msg)) => {
+                assert!(
+                    msg.contains("127.0.0.1:9876"),
+                    "Expected normalized port 9876 in error message, got: {}",
+                    msg
+                );
+            }
+            Err(other) => {
+                panic!("Expected Disconnected error with normalized address, got: {:?}", other)
+            }
+            Ok(_) => panic!("Expected connection failure without active listener"),
+        },
+    }
+}

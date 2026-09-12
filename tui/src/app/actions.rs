@@ -62,7 +62,7 @@ impl AppState {
 
     /// Polls Transfer API `get_progress()` on the 250ms tick (§13).
     pub fn poll_active_progress(&mut self) {
-        if self.current_screen == Screen::Transfers || self.current_screen == Screen::Resume {
+        if self.current_screen == Screen::Transfers {
             self.refresh_transfers();
         } else {
             self.refresh_transfers();
@@ -343,7 +343,6 @@ impl AppState {
 
         if prev_screen == Screen::ReceiveFiles
             && screen != Screen::ReceiveFiles
-            && screen != Screen::IncomingPrompt
             && screen != Screen::TransferScreen
             && screen != Screen::TransferDetails
         {
@@ -352,8 +351,9 @@ impl AppState {
 
         match screen {
             Screen::ReceiveFiles => self.start_receive_mode(),
+            Screen::SendFiles => self.start_send_mode(),
             Screen::DeviceSelection | Screen::Devices => self.refresh_devices(),
-            Screen::Transfers | Screen::Resume => self.refresh_transfers(),
+            Screen::Transfers => self.refresh_transfers(),
             Screen::TransferScreen | Screen::TransferDetails => self.poll_active_progress(),
             _ => {}
         }
@@ -374,15 +374,8 @@ impl AppState {
             Screen::TransferDetails => {
                 self.navigate_to(Screen::TransferScreen);
             }
-            Screen::Resume => {
-                self.navigate_to(Screen::Transfers);
-            }
             Screen::BenchmarkResults => {
                 self.navigate_to(Screen::Benchmark);
-            }
-            Screen::IncomingPrompt => {
-                self.incoming_prompt = None;
-                self.navigate_to(Screen::ReceiveFiles);
             }
             _ => {
                 self.navigate_to(Screen::MainMenu);
@@ -438,5 +431,11 @@ impl AppState {
             leave_receive_mode(None);
             self.status_message = Some("Receiver service stopped".to_string());
         }
+    }
+
+    /// Prepares send mode by triggering Android receive mode, configuring tunnels, and connecting Wi-Fi.
+    pub fn start_send_mode(&mut self) {
+        turbotransfer_core::transfer::prepare_send_mode();
+        self.refresh_devices();
     }
 }

@@ -17,86 +17,45 @@ pub enum Screen {
     TransferScreen,
     TransferDetails,
     ReceiveFiles,
-    IncomingPrompt,
     Devices,
     Transfers,
-    Resume,
     Benchmark,
     BenchmarkResults,
     Settings,
 }
 
-impl Screen {
-    pub const ALL: [Screen; 15] = [
-        Screen::MainMenu,
-        Screen::SendFiles,
-        Screen::FileBrowser,
-        Screen::DeviceSelection,
-        Screen::TransportSelection,
-        Screen::TransferScreen,
-        Screen::TransferDetails,
-        Screen::ReceiveFiles,
-        Screen::IncomingPrompt,
-        Screen::Devices,
-        Screen::Transfers,
-        Screen::Resume,
-        Screen::Benchmark,
-        Screen::BenchmarkResults,
-        Screen::Settings,
-    ];
-}
 
 /// Settings screen sub-tabs (6 tabs per TRD §13).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsTab {
     Transport,
-    Transfer,
-    Performance,
     Storage,
-    Security,
-    Interface,
 }
 
 impl SettingsTab {
-    pub const ALL: [SettingsTab; 6] = [
+    pub const ALL: [SettingsTab; 2] = [
         SettingsTab::Transport,
-        SettingsTab::Transfer,
-        SettingsTab::Performance,
         SettingsTab::Storage,
-        SettingsTab::Security,
-        SettingsTab::Interface,
     ];
 
     pub fn title(&self) -> &'static str {
         match self {
             SettingsTab::Transport => "1. Transport",
-            SettingsTab::Transfer => "2. Transfer",
-            SettingsTab::Performance => "3. Performance",
-            SettingsTab::Storage => "4. Storage",
-            SettingsTab::Security => "5. Security",
-            SettingsTab::Interface => "6. Interface",
+            SettingsTab::Storage => "2. Storage",
         }
     }
 
     pub fn next(&self) -> Self {
         match self {
-            SettingsTab::Transport => SettingsTab::Transfer,
-            SettingsTab::Transfer => SettingsTab::Performance,
-            SettingsTab::Performance => SettingsTab::Storage,
-            SettingsTab::Storage => SettingsTab::Security,
-            SettingsTab::Security => SettingsTab::Interface,
-            SettingsTab::Interface => SettingsTab::Transport,
+            SettingsTab::Transport => SettingsTab::Storage,
+            SettingsTab::Storage => SettingsTab::Transport,
         }
     }
 
     pub fn prev(&self) -> Self {
         match self {
-            SettingsTab::Transport => SettingsTab::Interface,
-            SettingsTab::Transfer => SettingsTab::Transport,
-            SettingsTab::Performance => SettingsTab::Transfer,
-            SettingsTab::Storage => SettingsTab::Performance,
-            SettingsTab::Security => SettingsTab::Storage,
-            SettingsTab::Interface => SettingsTab::Security,
+            SettingsTab::Transport => SettingsTab::Storage,
+            SettingsTab::Storage => SettingsTab::Transport,
         }
     }
 }
@@ -148,15 +107,6 @@ pub enum InputMode {
     Editing,
 }
 
-/// Information for an incoming transfer prompt (§13).
-#[derive(Debug, Clone)]
-pub struct IncomingTransferInfo {
-    pub transfer_id: Uuid,
-    pub sender_name: String,
-    pub file_name: String,
-    pub file_size: u64,
-}
-
 /// TUI-local application state kept strictly inside the TUI layer (§13).
 pub struct AppState {
     pub current_screen: Screen,
@@ -170,7 +120,6 @@ pub struct AppState {
 
     // Send Flow state
     pub selected_file_path: Option<PathBuf>,
-    pub path_input_buffer: String,
     pub browser_current_dir: PathBuf,
     pub browser_entries: Vec<PathBuf>,
     pub browser_selected_index: usize,
@@ -183,7 +132,6 @@ pub struct AppState {
 
     // Receive Flow state
     pub is_receiving: bool,
-    pub incoming_prompt: Option<IncomingTransferInfo>,
 
     // Live Transfer & Benchmark state
     pub active_progress: Option<TransferProgress>,
@@ -223,7 +171,6 @@ impl AppState {
             running: true,
 
             selected_file_path: None,
-            path_input_buffer: String::new(),
             browser_current_dir: initial_dir,
             browser_entries: Vec::new(),
             browser_selected_index: 0,
@@ -235,7 +182,6 @@ impl AppState {
             active_transfer_id: None,
 
             is_receiving: false,
-            incoming_prompt: None,
 
             active_progress: None,
             transfers_tab: TransfersTab::Current,

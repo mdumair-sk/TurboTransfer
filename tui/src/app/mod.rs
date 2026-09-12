@@ -9,16 +9,27 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
-    fn test_all_15_screens_reachable() {
+    fn test_screens_reachable() {
         let mut app = AppState::new();
+        let screens = [
+            Screen::MainMenu,
+            Screen::SendFiles,
+            Screen::FileBrowser,
+            Screen::DeviceSelection,
+            Screen::TransportSelection,
+            Screen::TransferScreen,
+            Screen::TransferDetails,
+            Screen::ReceiveFiles,
+            Screen::Devices,
+            Screen::Transfers,
+            Screen::Benchmark,
+            Screen::BenchmarkResults,
+            Screen::Settings,
+        ];
 
-        for &screen in &Screen::ALL {
+        for &screen in &screens {
             app.current_screen = screen;
-            assert_eq!(
-                app.current_screen, screen,
-                "Screen {:?} was not reachable",
-                screen
-            );
+            assert_eq!(app.current_screen, screen);
         }
     }
 
@@ -31,7 +42,7 @@ mod tests {
         assert_eq!(app.current_screen, Screen::Settings);
 
         app.next_settings_tab();
-        assert_eq!(app.settings_tab, SettingsTab::Transfer);
+        assert_eq!(app.settings_tab, SettingsTab::Storage);
 
         app.on_back();
         assert_eq!(app.current_screen, Screen::MainMenu);

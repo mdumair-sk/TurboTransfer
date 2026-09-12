@@ -58,7 +58,7 @@ pub fn render_receive_files(f: &mut Frame, app: &AppState, area: Rect) {
         ]),
         Line::from(""),
         Line::from(Span::styled("   Waiting for a remote peer to initiate a transfer offer...", Style::default().fg(Color::Gray))),
-        Line::from(Span::styled("   When an incoming file arrives, an acceptance dialog will pop up automatically.", Style::default().fg(Color::DarkGray))),
+        Line::from(Span::styled("   Incoming transfers are accepted automatically and streamed to the download folder.", Style::default().fg(Color::DarkGray))),
     ];
 
     let body_para = Paragraph::new(lines).block(body_block);

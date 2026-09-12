@@ -80,7 +80,11 @@ class TransferViewModel @Inject constructor(
         }
 
         if (progress.status == TransferStatus.COMPLETED) {
-            val durationMs = System.currentTimeMillis() - session.startTimeMs
+            val durationMs = if (progress.durationSeconds > 0.05) {
+                (progress.durationSeconds * 1000.0).toLong()
+            } else {
+                System.currentTimeMillis() - session.startTimeMs
+            }
             val avgSpeed = if (progress.aggregateSpeedMBps > 0.01) {
                 progress.aggregateSpeedMBps
             } else if (speedSampleCount > 0) {

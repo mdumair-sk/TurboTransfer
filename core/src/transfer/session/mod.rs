@@ -401,6 +401,9 @@ pub async fn send_file_session_multipath_ext(
         export_and_clean_telemetry(transfer_id, &data_dir);
         return Ok(());
     }
+    // Anchor transfer timing to the exact moment chunk streaming begins
+    crate::transfer::api::reset_transfer_start_time(transfer_id);
+
 
     let (prepared_tx, prepared_rx) = async_channel::bounded::<PreparedChunk>(256);
     let (retry_tx, retry_rx) = std::sync::mpsc::channel::<crate::chunk::ChunkPlanEntry>();

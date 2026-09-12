@@ -100,8 +100,8 @@ pub fn render_transfer_screen(f: &mut Frame, app: &AppState, area: Rect) {
     f.render_widget(header_para, chunks[0]);
 
     // Progress percentage & speed calculations
-    let (percent, bytes_transferred, total_bytes, total_mbps, usb_mbps, wifi_mbps, eta_str) =
-        if let Some(ref p) = app.active_progress {
+    let (percent, bytes_transferred, total_bytes, total_mbps, usb_mbps, wifi_mbps, eta_str, duration_secs, usb_bytes, wifi_bytes) =
+        if let Some(p) = &app.active_progress {
             let eta = p
                 .eta_seconds
                 .map(|s| format!("{}s", s))
@@ -114,6 +114,9 @@ pub fn render_transfer_screen(f: &mut Frame, app: &AppState, area: Rect) {
                 p.usb_throughput_bps / (1024.0 * 1024.0),
                 p.wifi_throughput_bps / (1024.0 * 1024.0),
                 eta,
+                p.duration_seconds,
+                p.usb_bytes_transferred,
+                p.wifi_bytes_transferred,
             )
         } else {
             let total = app
@@ -122,7 +125,7 @@ pub fn render_transfer_screen(f: &mut Frame, app: &AppState, area: Rect) {
                 .and_then(|p| std::fs::metadata(p).ok())
                 .map(|m| m.len())
                 .unwrap_or(0);
-            (0, 0, total, 0.0, 0.0, 0.0, "--".to_string())
+            (0, 0, total, 0.0, 0.0, 0.0, "--".to_string(), 0.0, 0, 0)
         };
 
     // Gauge Progress Bar
@@ -203,7 +206,17 @@ pub fn render_transfer_screen(f: &mut Frame, app: &AppState, area: Rect) {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    "  │  Total Transferred: ",
+                    "  │  Duration: ",
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    format!("{:.1}s", duration_secs),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "  │  Total: ",
                     Style::default().fg(Color::DarkGray),
                 ),
                 Span::styled(
@@ -220,6 +233,14 @@ pub fn render_transfer_screen(f: &mut Frame, app: &AppState, area: Rect) {
                         .fg(Color::White)
                         .add_modifier(Modifier::BOLD),
                 ),
+                Span::styled(
+                    if bytes_transferred > 0 {
+                        format!("  ({:.1} MB, {:.1}%)", usb_bytes as f64 / (1024.0 * 1024.0), (usb_bytes as f64 / bytes_transferred as f64) * 100.0)
+                    } else {
+                        "".to_string()
+                    },
+                    Style::default().fg(Color::DarkGray),
+                ),
             ]),
             Line::from(vec![
                 Span::styled("   └─ 5 GHz Wi-Fi:  ", Style::default().fg(Color::DarkGray)),
@@ -229,8 +250,15 @@ pub fn render_transfer_screen(f: &mut Frame, app: &AppState, area: Rect) {
                         .fg(Color::White)
                         .add_modifier(Modifier::BOLD),
                 ),
+                Span::styled(
+                    if bytes_transferred > 0 {
+                        format!("  ({:.1} MB, {:.1}%)", wifi_bytes as f64 / (1024.0 * 1024.0), (wifi_bytes as f64 / bytes_transferred as f64) * 100.0)
+                    } else {
+                        "".to_string()
+                    },
+                    Style::default().fg(Color::DarkGray),
+                ),
             ]),
-            Line::from(""),
             Line::from(vec![Span::styled(
                 "   [Enter] Return to Receiver / Menu   │   [Esc] Dashboard   │   [D] View Details",
                 Style::default().fg(Color::DarkGray),
@@ -277,7 +305,7 @@ pub fn render_transfer_screen(f: &mut Frame, app: &AppState, area: Rect) {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    format!("  (ETA: {})", eta_str),
+                    format!("  (ETA: {} │ Elapsed: {:.1}s)", eta_str, duration_secs),
                     Style::default().fg(Color::White),
                 ),
             ]),

@@ -19,5 +19,8 @@ data class TransferProgressInfo(
     val usbSpeedMBps: Double,
     val wifiSpeedMBps: Double,
     val etaSeconds: Long?,
+    val durationSeconds: Double = 0.0,
+    val usbBytesTransferred: Long = 0L,
+    val wifiBytesTransferred: Long = 0L,
     val status: TransferStatus
 )

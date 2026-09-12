@@ -49,8 +49,13 @@ pub fn configure_tcp_stream(stream: &TcpStream) {
 impl TcpTransport {
     /// Connects to a peer over a TCP socket at the specified address (e.g. "192.168.1.19:9876").
     pub async fn connect(addr: &str) -> Result<Self, TransportError> {
-        let stream = TcpStream::connect(addr).await.map_err(|e| {
-            TransportError::Disconnected(format!("Failed to connect to {}: {}", addr, e))
+        let normalized_addr = if !addr.contains(':') {
+            format!("{}:9876", addr)
+        } else {
+            addr.to_string()
+        };
+        let stream = TcpStream::connect(&normalized_addr).await.map_err(|e| {
+            TransportError::Disconnected(format!("Failed to connect to {}: {}", normalized_addr, e))
         })?;
         Ok(Self::from_stream(stream))
     }

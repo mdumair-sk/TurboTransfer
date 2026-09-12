@@ -24,6 +24,9 @@ pub struct TransferProgress {
     pub wifi_throughput_bps: f64,
     pub aggregate_throughput_bps: f64,
     pub eta_seconds: Option<u64>,
+    pub duration_seconds: f64,
+    pub usb_bytes_transferred: u64,
+    pub wifi_bytes_transferred: u64,
     pub total_chunks: u32,
     pub completed_chunks: u32,
     pub retry_count: u64,
@@ -101,6 +104,17 @@ pub fn record_channel_bytes(transfer_id: Uuid, is_usb: bool, bytes: u64) {
         } else {
             record.wifi_bytes_transferred.fetch_add(bytes, Ordering::Relaxed);
         }
+    }
+}
+
+/// Resets the start time of an active transfer to now, anchoring measurement to active transmission.
+pub fn reset_transfer_start_time(transfer_id: Uuid) {
+    let registry = get_registry();
+    let mut map = registry.transfers.lock();
+    if let Some(record) = map.get_mut(&transfer_id) {
+        let now = std::time::Instant::now();
+        record.start_time = now;
+        *record.last_sample_time.lock() = now;
     }
 }
 
@@ -383,7 +397,7 @@ pub fn get_progress(transfer_id: Uuid) -> Option<TransferProgress> {
         }
     }
 
-    let (throughput, usb_speed, wifi_speed) = if status == TransferStatus::Completed {
+    let (throughput, usb_speed, wifi_speed, duration_secs) = if status == TransferStatus::Completed {
         let mut end_time = record.end_time.lock();
         let end_instant = *end_time.get_or_insert(now);
         let elapsed = end_instant.duration_since(record.start_time).as_secs_f64().max(0.05);
@@ -397,31 +411,33 @@ pub fn get_progress(transfer_id: Uuid) -> Option<TransferProgress> {
                 avg,
                 (usb_bytes as f64) / elapsed,
                 (wifi_bytes as f64) / elapsed,
+                elapsed,
             )
         } else {
             let is_usb = record.transport_name.contains("USB") || record.transport_name.contains("ADB") || record.transport_name.contains("127.0.0.1");
             let is_wifi = record.transport_name.contains("Wi-Fi") || record.transport_name.contains("Hotspot") || record.transport_name.contains("P2P") || record.transport_name.contains("10.18.") || record.transport_name.contains("192.168.");
             if is_usb && is_wifi {
-                (avg, avg * 0.5, avg * 0.5)
+                (avg, avg * 0.5, avg * 0.5, elapsed)
             } else if is_wifi {
-                (avg, 0.0, avg)
+                (avg, 0.0, avg, elapsed)
             } else {
-                (avg, avg, 0.0)
+                (avg, avg, 0.0, elapsed)
             }
         }
     } else {
+        let elapsed = now.duration_since(record.start_time).as_secs_f64().max(0.0);
         // If channel counters were recorded, use them; otherwise fall back to transport name heuristics
         if *rolling_usb > 0.0 || *rolling_wifi > 0.0 {
-            (*rolling, *rolling_usb, *rolling_wifi)
+            (*rolling, *rolling_usb, *rolling_wifi, elapsed)
         } else {
             let is_usb = record.transport_name.contains("USB") || record.transport_name.contains("ADB") || record.transport_name.contains("127.0.0.1");
             let is_wifi = record.transport_name.contains("Wi-Fi") || record.transport_name.contains("Hotspot") || record.transport_name.contains("P2P") || record.transport_name.contains("10.18.") || record.transport_name.contains("192.168.");
             if is_usb && is_wifi {
-                (*rolling, *rolling * 0.5, *rolling * 0.5)
+                (*rolling, *rolling * 0.5, *rolling * 0.5, elapsed)
             } else if is_wifi {
-                (*rolling, 0.0, *rolling)
+                (*rolling, 0.0, *rolling, elapsed)
             } else {
-                (*rolling, *rolling, 0.0)
+                (*rolling, *rolling, 0.0, elapsed)
             }
         }
     };
@@ -491,6 +507,9 @@ pub fn get_progress(transfer_id: Uuid) -> Option<TransferProgress> {
         wifi_throughput_bps: wifi_speed,
         aggregate_throughput_bps: throughput,
         eta_seconds: eta,
+        duration_seconds: duration_secs,
+        usb_bytes_transferred: usb_bytes,
+        wifi_bytes_transferred: wifi_bytes,
         total_chunks: record.total_chunks,
         completed_chunks: chunks,
         retry_count: 0,

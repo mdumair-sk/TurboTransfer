@@ -89,6 +89,9 @@ class RustCoreDataSource @Inject constructor(
                 usbSpeedMBps = usbSpeedMBps,
                 wifiSpeedMBps = wifiSpeedMBps,
                 etaSeconds = ffiProgress.etaSeconds?.toLong(),
+                durationSeconds = ffiProgress.durationSeconds,
+                usbBytesTransferred = ffiProgress.usbBytesTransferred.toLong(),
+                wifiBytesTransferred = ffiProgress.wifiBytesTransferred.toLong(),
                 status = status
             )
         } catch (e: Exception) {
