@@ -18,6 +18,7 @@ use crate::checksum::{compute_file_crc32c, compute_xxhash64};
 use crate::manifest::{MetaActor, TransferMeta, TransferRole, TransferStatus, TransportType};
 use crate::protocol::{
     ChunkAckData, ChunkNackData, HelloData, Message, TransferAcceptData,
+    CURRENT_PROTOCOL_VERSION, MIN_SUPPORTED_PROTOCOL_VERSION,
 };
 use crate::transport::{TcpListenerTransport, Transport};
 #[cfg(not(target_os = "android"))]
@@ -222,7 +223,7 @@ pub(crate) async fn handle_incoming_receive_transport(
     completion_tx: tokio::sync::mpsc::UnboundedSender<PathBuf>,
 ) -> Result<(), TransferSessionError> {
     // 1. Handshake: Await Hello
-    let _hello = match transport.receive_frame().await? {
+    let peer_hello = match transport.receive_frame().await? {
         Some(Message::Hello(h)) => h,
         Some(other) => {
             return Err(TransferSessionError::UnexpectedMessage(format!(
@@ -232,12 +233,17 @@ pub(crate) async fn handle_incoming_receive_transport(
         }
         None => return Ok(()), // EOF / probe
     };
+    if peer_hello.protocol_version < MIN_SUPPORTED_PROTOCOL_VERSION {
+        return Err(TransferSessionError::Protocol(crate::protocol::ProtocolError::DeserializationError(
+            format!("Unsupported protocol version: {}", peer_hello.protocol_version),
+        )));
+    }
 
     // Reply Hello
     let receiver_hello = Message::Hello(HelloData {
         device_id: Uuid::new_v4(),
         device_name: "TurboReceiver".to_string(),
-        protocol_version: 1,
+        protocol_version: CURRENT_PROTOCOL_VERSION,
     });
     transport.send_frame(&receiver_hello).await?;
 
@@ -577,6 +583,10 @@ pub(crate) async fn handle_incoming_receive_transport(
                                 TransferStatus::Failed,
                                 Some(format!("Disk write error: {}", e)),
                             );
+                            let _ = std::fs::remove_file(&session.part_path);
+                            get_active_receive_sessions()
+                                .lock()
+                                .remove(&complete_data.transfer_id);
                             return Err(TransferSessionError::Io(e));
                         }
                     }
@@ -589,6 +599,10 @@ pub(crate) async fn handle_incoming_receive_transport(
                             TransferStatus::Failed,
                             Some(format!("Disk write error: {}", err)),
                         );
+                        let _ = std::fs::remove_file(&session.part_path);
+                        get_active_receive_sessions()
+                            .lock()
+                            .remove(&complete_data.transfer_id);
                         return Err(TransferSessionError::Io(std::io::Error::new(
                             std::io::ErrorKind::Other,
                             format!("Disk write error: {}", err),
@@ -624,12 +638,15 @@ pub(crate) async fn handle_incoming_receive_transport(
                             TransferStatus::Failed,
                             Some("CRC32C mismatch".to_string()),
                         );
+                        let _ = std::fs::remove_file(&session.part_path);
+                        get_active_receive_sessions()
+                            .lock()
+                            .remove(&complete_data.transfer_id);
                         return Err(TransferSessionError::ChecksumMismatch(format!(
                             "File CRC32C mismatch: expected 0x{:08X}, got 0x{:08X}",
                             complete_data.file_checksum, file_crc
                         )));
                     }
-
                     if session.is_ephemeral {
                         let _ = std::fs::remove_file(&session.part_path);
                         let _ = std::fs::remove_file(&session.file_path);

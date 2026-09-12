@@ -18,15 +18,21 @@ pub struct ChunkPlanEntry {
 /// - Tiny files (< 4 MiB): 256 KiB – 512 KiB (low pipeline latency, fine-grained progress)
 /// - Medium files (4 MiB – 128 MiB): 1 MiB (standard Wi-Fi Direct streaming)
 /// - Large files (> 128 MiB): 2 MiB – 4 MiB (maximum wire efficiency for multi-gigabit bonded links)
-pub fn select_optimal_chunk_size(file_size: u64, _is_high_speed_link: bool) -> u32 {
+pub fn select_optimal_chunk_size(file_size: u64, is_high_speed_link: bool) -> u32 {
     if file_size < 1024 * 1024 {
         256 * 1024 // 256 KiB
     } else if file_size < 4 * 1024 * 1024 {
         512 * 1024 // 512 KiB
     } else if file_size < 64 * 1024 * 1024 {
-        1024 * 1024 // 1 MiB
+        if is_high_speed_link {
+            2 * 1024 * 1024 // 2 MiB for USB/Combined
+        } else {
+            1024 * 1024 // 1 MiB for standard Wi-Fi Direct
+        }
+    } else if is_high_speed_link {
+        4 * 1024 * 1024 // 4 MiB maximum wire efficiency for multi-gigabit bonded/USB links
     } else {
-        2 * 1024 * 1024 // 2 MiB (Optimal wire & pipeline sizing for 100+ MB/s Wi-Fi Direct)
+        2 * 1024 * 1024 // 2 MiB for standard Wi-Fi Direct
     }
 }
 

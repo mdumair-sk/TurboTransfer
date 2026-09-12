@@ -5,8 +5,10 @@ use turbotransfer_core::benchmark::{
     clear_saved_calibration, get_saved_calibration, save_calibration, EphemeralFile,
     TransferConfigOverride, TransferPurpose, WindowPreset,
 };
+use turbotransfer_core::chunk::select_optimal_chunk_size;
 use turbotransfer_core::protocol::{
-    Message, TransferOfferData, MSG_TYPE_TRANSFER_OFFER,
+    ChunkDataPayload, CompleteData, HelloData, Message, TransferOfferData,
+    CURRENT_PROTOCOL_VERSION, MSG_TYPE_TRANSFER_OFFER,
 };
 
 #[test]
@@ -63,7 +65,7 @@ fn benchmark_test_config_store_save_get_clear() {
     );
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 struct LegacyOfferTest {
     transfer_id: Uuid,
     file_id: Uuid,
@@ -99,8 +101,47 @@ fn benchmark_test_wire_protocol_backward_compatibility() {
         }
         _ => panic!("Expected TransferOffer"),
     }
+    // 2. Modern client sending TransferOffer with TransferPurpose::Normal
+    //    Must omit purpose on wire so legacy receivers can deserialize without trailing bytes error
+    let modern_normal = TransferOfferData {
+        transfer_id,
+        file_id,
+        file_name: "legacy.dat".into(),
+        file_size: 1024,
+        chunk_size: 512,
+        total_chunks: 2,
+        checksum_algo: "xxhash64".into(),
+        purpose: TransferPurpose::Normal,
+    };
+    let modern_normal_bytes = bincode::serialize(&modern_normal).unwrap();
+    assert_eq!(
+        modern_normal_bytes.len(),
+        legacy_bytes.len(),
+        "Normal offer must not serialize purpose on wire"
+    );
+    // Legacy receiver deserializes modern normal bytes successfully:
+    let legacy_deserialized: LegacyOfferTest = bincode::deserialize(&modern_normal_bytes)
+        .expect("Legacy receiver must deserialize modern normal offer");
+    assert_eq!(legacy_deserialized.file_name, "legacy.dat");
 
-    // 2. Modern client sending TransferOffer with TransferPurpose::Benchmark
+    // Decoding legacy bytes via wire protocol Message::decode_payload populates purpose as Normal
+    let decoded_legacy = Message::decode_payload(MSG_TYPE_TRANSFER_OFFER, &legacy_bytes).unwrap();
+    match decoded_legacy {
+        Message::TransferOffer(offer) => {
+            assert_eq!(offer.purpose, TransferPurpose::Normal);
+        }
+        _ => panic!("Expected TransferOffer"),
+    }
+
+    // Decoding modern normal bytes via wire protocol also decodes as Normal
+    let decoded_modern_normal = Message::decode_payload(MSG_TYPE_TRANSFER_OFFER, &modern_normal_bytes).unwrap();
+    match decoded_modern_normal {
+        Message::TransferOffer(offer) => {
+            assert_eq!(offer.purpose, TransferPurpose::Normal);
+        }
+        _ => panic!("Expected TransferOffer"),
+    }
+    // 3. Modern client sending TransferOffer with TransferPurpose::Benchmark
     let modern = TransferOfferData {
         transfer_id,
         file_id,
@@ -112,6 +153,10 @@ fn benchmark_test_wire_protocol_backward_compatibility() {
         purpose: TransferPurpose::Benchmark,
     };
     let modern_bytes = bincode::serialize(&modern).unwrap();
+    assert!(
+        modern_bytes.len() > modern_normal_bytes.len(),
+        "Benchmark offer must serialize purpose field on wire"
+    );
 
     let decoded = Message::decode_payload(MSG_TYPE_TRANSFER_OFFER, &modern_bytes).unwrap();
     match decoded {
@@ -120,6 +165,209 @@ fn benchmark_test_wire_protocol_backward_compatibility() {
             assert_eq!(offer.purpose, TransferPurpose::Benchmark);
         }
         _ => panic!("Expected TransferOffer"),
+    }
+}
+
+#[test]
+fn benchmark_test_chunk_size_link_speed_scaling() {
+    // Tiny files (< 1 MiB): 256 KiB regardless of link speed
+    assert_eq!(select_optimal_chunk_size(500 * 1024, false), 256 * 1024);
+    assert_eq!(select_optimal_chunk_size(500 * 1024, true), 256 * 1024);
+
+    // Small files (1 MiB - 4 MiB): 512 KiB regardless of link speed
+    assert_eq!(select_optimal_chunk_size(2 * 1024 * 1024, false), 512 * 1024);
+    assert_eq!(select_optimal_chunk_size(2 * 1024 * 1024, true), 512 * 1024);
+
+    // Medium files (4 MiB - 64 MiB): 1 MiB standard Wi-Fi, 2 MiB high speed (USB/Combined)
+    assert_eq!(select_optimal_chunk_size(10 * 1024 * 1024, false), 1024 * 1024);
+    assert_eq!(select_optimal_chunk_size(10 * 1024 * 1024, true), 2 * 1024 * 1024);
+
+    // Large files (>= 64 MiB): 2 MiB standard Wi-Fi, 4 MiB high speed (USB/Combined)
+    assert_eq!(select_optimal_chunk_size(128 * 1024 * 1024, false), 2 * 1024 * 1024);
+    assert_eq!(select_optimal_chunk_size(128 * 1024 * 1024, true), 4 * 1024 * 1024);
+}
+
+#[tokio::test]
+async fn benchmark_test_part_cleanup_on_checksum_mismatch() {
+    use turbotransfer_core::transport::{StreamTransport, Transport, TransportKind};
+
+    let temp_dest = tempfile::tempdir().unwrap();
+    let addr = "127.0.0.1:9941";
+
+    let _receiver = turbotransfer_core::transfer::api::enter_receive_mode(
+        Some(addr.to_string()),
+        temp_dest.path().to_path_buf(),
+    )
+    .await
+    .expect("Failed to start receiver on 9941");
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    let stream = tokio::net::TcpStream::connect(addr)
+        .await
+        .expect("Failed to connect to receiver");
+    let mut transport = StreamTransport::new(stream, TransportKind::WifiDirect);
+
+    // 1. Send client Hello
+    let hello = Message::Hello(HelloData {
+        device_id: Uuid::new_v4(),
+        device_name: "TestSender".into(),
+        protocol_version: CURRENT_PROTOCOL_VERSION,
+    });
+    transport.send_frame(&hello).await.unwrap();
+
+    // 2. Receive receiver Hello
+    let recv_hello = transport.receive_frame().await.unwrap().unwrap();
+    assert!(matches!(recv_hello, Message::Hello(_)));
+
+    // 3. Send TransferOffer
+    let transfer_id = Uuid::new_v4();
+    let file_id = Uuid::new_v4();
+    let file_name = "corrupt_test.bin".to_string();
+    let offer = Message::TransferOffer(TransferOfferData {
+        transfer_id,
+        file_id,
+        file_name: file_name.clone(),
+        file_size: 1024,
+        chunk_size: 1024,
+        total_chunks: 1,
+        checksum_algo: "xxhash64".into(),
+        purpose: TransferPurpose::Normal,
+    });
+    transport.send_frame(&offer).await.unwrap();
+
+    // 4. Await TransferAccept
+    let accept = transport.receive_frame().await.unwrap().unwrap();
+    assert!(matches!(accept, Message::TransferAccept(_)));
+
+    // 5. Send ChunkData
+    let payload = vec![0x42u8; 1024];
+    let chunk = Message::ChunkData(ChunkDataPayload {
+        transfer_id,
+        file_id,
+        chunk_id: 0,
+        file_offset: 0,
+        payload_length: 1024,
+        checksum: turbotransfer_core::checksum::compute_xxhash64(&payload),
+        payload: payload.clone(),
+    });
+    transport.send_frame(&chunk).await.unwrap();
+
+    // 6. Await ChunkAck
+    let ack = transport.receive_frame().await.unwrap().unwrap();
+    assert!(matches!(ack, Message::ChunkAck(_)));
+
+    // Verify the .part file exists on disk while transfer is in flight
+    let part_path = temp_dest.path().join(format!("{}.part", file_name));
+    assert!(part_path.exists(), "Part file must exist during transfer");
+
+    let complete = Message::Complete(CompleteData {
+        transfer_id,
+        file_checksum: 0xDEADBEEF,
+    });
+    transport.send_frame(&complete).await.unwrap();
+
+    // Allow receiver loop to process the checksum mismatch and clean up
+    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+    // Verify .part file has been removed and final file was never created
+    let final_path = temp_dest.path().join(&file_name);
+    assert!(
+        !part_path.exists(),
+        "Part file must be deleted on checksum mismatch"
+    );
+    assert!(
+        !final_path.exists(),
+        "Final file must not be created on checksum mismatch"
+    );
+}
+
+#[tokio::test]
+async fn benchmark_test_handshake_protocol_version_validation() {
+    use turbotransfer_core::transport::{StreamTransport, Transport, TransportKind};
+
+    let temp_dest = tempfile::tempdir().unwrap();
+    let addr = "127.0.0.1:9942";
+
+    let _receiver = turbotransfer_core::transfer::api::enter_receive_mode(
+        Some(addr.to_string()),
+        temp_dest.path().to_path_buf(),
+    )
+    .await
+    .expect("Failed to start receiver on 9942");
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // 1. Client sends protocol_version: 0 -> must be rejected
+    let stream = tokio::net::TcpStream::connect(addr)
+        .await
+        .expect("Failed to connect to receiver");
+    let mut transport = StreamTransport::new(stream, TransportKind::WifiDirect);
+
+    let invalid_hello = Message::Hello(HelloData {
+        device_id: Uuid::new_v4(),
+        device_name: "BadClient".into(),
+        protocol_version: 0,
+    });
+    transport.send_frame(&invalid_hello).await.unwrap();
+
+    // Receiver must reject version 0 and close connection without sending Hello
+    let response = transport.receive_frame().await;
+    match response {
+        Ok(None) | Err(_) => {
+            // Expected: receiver closed connection on version error
+        }
+        Ok(Some(other)) => {
+            panic!("Receiver should not accept protocol_version 0, got {:?}", other);
+        }
+    }
+
+    // 2. Sender with TransferPurpose::Benchmark connecting to peer with protocol_version: 1
+    let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+    let sender_task = tokio::spawn(async move {
+        let client_transport = StreamTransport::new(client_stream, TransportKind::WifiDirect);
+        let transports: Vec<(Box<dyn Transport>, bool)> = vec![(Box::new(client_transport), false)];
+        let temp_file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp_file.path(), b"benchmark content").unwrap();
+
+        let options = turbotransfer_core::transfer::session::SessionOptions {
+            purpose: TransferPurpose::Benchmark,
+            wifi_window_preset: None,
+        };
+
+        turbotransfer_core::transfer::session::send_file_session_multipath_ext(
+            Uuid::new_v4(),
+            "Sender",
+            temp_file.path(),
+            1024 * 1024,
+            Uuid::new_v4(),
+            transports,
+            None,
+            options,
+        )
+        .await
+    });
+
+    // Mock legacy server: receives sender Hello, responds with protocol_version: 1
+    let mut server_transport = StreamTransport::new(server_stream, TransportKind::WifiDirect);
+    let _sender_hello = server_transport.receive_frame().await.unwrap().unwrap();
+    let legacy_hello = Message::Hello(HelloData {
+        device_id: Uuid::new_v4(),
+        device_name: "LegacyReceiver".into(),
+        protocol_version: 1,
+    });
+    server_transport.send_frame(&legacy_hello).await.unwrap();
+
+    let result = sender_task.await.unwrap();
+    match result {
+        Err(turbotransfer_core::transfer::session::TransferSessionError::Rejected(reason)) => {
+            assert!(
+                reason.contains("does not support Benchmark"),
+                "Expected rejection for unsupported purpose, got: {}",
+                reason
+            );
+        }
+        other => panic!("Expected Rejected error for Benchmark on peer version 1, got {:?}", other),
     }
 }
 

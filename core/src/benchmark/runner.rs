@@ -24,7 +24,9 @@ pub async fn run_benchmark_transfer(
     active_tx_slot: Option<Arc<Mutex<Option<Uuid>>>>,
 ) -> Result<BenchmarkResult, TransferSessionError> {
     let size_bytes = (size_mb as u64) * 1024 * 1024;
-    let ephemeral = EphemeralFile::create(size_bytes, None)
+    let ephemeral = tokio::task::spawn_blocking(move || EphemeralFile::create(size_bytes, None))
+        .await
+        .map_err(|e| TransferSessionError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?
         .map_err(TransferSessionError::Io)?;
 
     let target_id = target_device_id.unwrap_or_else(Uuid::new_v4);

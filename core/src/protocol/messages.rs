@@ -29,6 +29,12 @@ pub const MSG_TYPE_COMPLETE: u8 = 0x0B;
 /// Message type code for `BatchChunkAck` (0x0D)
 pub const MSG_TYPE_BATCH_CHUNK_ACK: u8 = 0x0D;
 
+/// Current protocol version.
+/// - Version 1: Initial protocol (7-field TransferOffer)
+/// - Version 2: Multi-purpose transfer support (Benchmark & Calibration ephemeral transfers)
+pub const CURRENT_PROTOCOL_VERSION: u32 = 2;
+pub const MIN_SUPPORTED_PROTOCOL_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HelloData {
     pub device_id: Uuid,
@@ -45,6 +51,7 @@ pub struct TransferOfferData {
     pub chunk_size: u32,
     pub total_chunks: u32,
     pub checksum_algo: String,
+    #[serde(default, skip_serializing_if = "TransferPurpose::is_normal")]
     pub purpose: TransferPurpose,
 }
 

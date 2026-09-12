@@ -10,6 +10,12 @@ pub enum TransferPurpose {
     Calibration,
 }
 
+impl TransferPurpose {
+    pub fn is_normal(&self) -> bool {
+        matches!(self, Self::Normal)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum WindowPreset {
     Conservative,

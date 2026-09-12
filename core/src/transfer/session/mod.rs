@@ -22,6 +22,7 @@ use crate::manifest::{generate_manifest_with_name, TransferRole, TransferStatus}
 use crate::protocol::{
     encode_frame, ChunkAckData, ChunkDataPayload, CompleteData, HelloData, Message,
     ProtocolError, TransferAcceptData, TransferOfferData,
+    CURRENT_PROTOCOL_VERSION, MIN_SUPPORTED_PROTOCOL_VERSION,
 };
 use crate::scheduler::{
     ChannelPerformanceModel, ChannelTracker, WindowController, USB_INITIAL_WINDOW,
@@ -214,7 +215,7 @@ pub async fn send_file_session_multipath_ext(
             let hello = Message::Hello(HelloData {
                 device_id: sender_device_id,
                 device_name: sender_device_name.to_string(),
-                protocol_version: 1,
+                protocol_version: CURRENT_PROTOCOL_VERSION,
             });
             transport.send_frame(&hello).await?;
 
@@ -222,10 +223,24 @@ pub async fn send_file_session_multipath_ext(
                 .receive_frame()
                 .await?
                 .ok_or_else(|| TransferSessionError::UnexpectedMessage("EOF during Hello".into()))?;
-            if !matches!(peer_hello, Message::Hello(_)) {
-                return Err(TransferSessionError::UnexpectedMessage(format!(
-                    "Expected Hello, got {:?}",
-                    peer_hello
+            let peer_version = match peer_hello {
+                Message::Hello(h) => h.protocol_version,
+                other => {
+                    return Err(TransferSessionError::UnexpectedMessage(format!(
+                        "Expected Hello, got {:?}",
+                        other
+                    )));
+                }
+            };
+            if peer_version < MIN_SUPPORTED_PROTOCOL_VERSION {
+                return Err(TransferSessionError::Protocol(ProtocolError::DeserializationError(
+                    format!("Unsupported protocol version: {}", peer_version),
+                )));
+            }
+            if options.purpose != TransferPurpose::Normal && peer_version < 2 {
+                return Err(TransferSessionError::Rejected(format!(
+                    "Peer protocol version {} does not support {:?} transfers",
+                    peer_version, options.purpose
                 )));
             }
 
@@ -272,6 +287,19 @@ pub async fn send_file_session_multipath_ext(
                 if let Some(ranges) = resume_from {
                     resume_ranges_combined.extend(ranges);
                 }
+            }
+            Err(TransferSessionError::Rejected(reason)) => {
+                telemetry.record_event(
+                    TransferStage::Handshake,
+                    EventLevel::Warn,
+                    &format!("Channel-{}", idx + 1),
+                    None,
+                    None,
+                    None,
+                    format!("Channel-{} ({}) handshake rejected: {}", idx + 1, ch_name, reason),
+                    None,
+                );
+                return Err(TransferSessionError::Rejected(reason));
             }
             Err(e) => {
                 telemetry.record_event(
@@ -900,10 +928,18 @@ where
         .ok_or(TransferSessionError::UnexpectedMessage(
             "EOF waiting for Hello".into(),
         ))?;
-    if !matches!(sender_hello, Message::Hello(_)) {
-        return Err(TransferSessionError::UnexpectedMessage(format!(
-            "Expected Hello, got {:?}",
-            sender_hello
+    let sender_version = match sender_hello {
+        Message::Hello(h) => h.protocol_version,
+        other => {
+            return Err(TransferSessionError::UnexpectedMessage(format!(
+                "Expected Hello, got {:?}",
+                other
+            )));
+        }
+    };
+    if sender_version < MIN_SUPPORTED_PROTOCOL_VERSION {
+        return Err(TransferSessionError::Protocol(ProtocolError::DeserializationError(
+            format!("Unsupported protocol version: {}", sender_version),
         )));
     }
 
@@ -911,11 +947,9 @@ where
     let hello = Message::Hello(HelloData {
         device_id: receiver_device_id,
         device_name: receiver_device_name.to_string(),
-        protocol_version: 1,
+        protocol_version: CURRENT_PROTOCOL_VERSION,
     });
     transport.send_frame(&hello).await?;
-
-    // 3. Await TransferOffer
     let offer_msg = transport
         .receive_frame()
         .await?
@@ -1116,6 +1150,7 @@ where
                         TransferStatus::Failed,
                         Some("CRC32C checksum mismatch".to_string()),
                     );
+                    let _ = std::fs::remove_file(&part_path);
                     return Err(TransferSessionError::ChecksumMismatch(format!(
                         "CRC32C expected 0x{:08X}, got 0x{:08X}",
                         complete_data.file_checksum, file_crc
